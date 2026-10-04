@@ -1,0 +1,8 @@
+.venv/
+.build-venv/
+__pycache__/
+*.egg-info/
+.animebt/
+build/
+dist/
+*.log
