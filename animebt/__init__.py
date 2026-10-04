@@ -1,0 +1,1 @@
+"""AnimeBT local search."""
