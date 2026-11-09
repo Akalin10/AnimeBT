@@ -6,3 +6,17 @@ __pycache__/
 build/
 dist/
 *.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+*.local
+*.sqlite*
+*.db
+*.torrent
+appearance.ini
+bt-sources.json
+title-assistant.json
+config.json
