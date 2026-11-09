@@ -5,6 +5,9 @@ from html import unescape
 from animebt.models import Resource, size_bytes
 
 
+MAX_SEARCH_PAGES = 12
+
+
 class Source:
     name = ""
     base_url = ""
@@ -19,17 +22,31 @@ class Source:
         response.raise_for_status()
         return response
 
+    async def search_pages(self, keyword):
+        yield await self.search(keyword)
+
 
 class AnimeGarden(Source):
     name = "Anime Garden"
     base_url = "https://api.animes.garden"
 
     async def search(self, keyword):
-        data = (await self.request("GET", "/resources", params={"search": keyword, "pageSize": self.limit})).json()
-        if data.get("status") != "OK" or not isinstance(data.get("resources"), list):
-            raise ValueError("Anime Garden 返回异常数据")
-        return [Resource(title=r["title"], size=size_bytes(r.get("size")), publish_time=r.get("createdAt"),
-                         magnet=r.get("magnet"), source=self.name) for r in data["resources"][:self.limit]]
+        return [item async for page in self.search_pages(keyword) for item in page]
+
+    async def search_pages(self, keyword):
+        for page in range(1, MAX_SEARCH_PAGES + 1):
+            params = {"search": keyword, "pageSize": self.limit, "page": page}
+            data = (await self.request("GET", "/resources", params=params)).json()
+            rows = data.get("resources")
+            if data.get("status") != "OK" or not isinstance(rows, list):
+                raise ValueError("Anime Garden 返回异常数据")
+            yield [Resource(title=r["title"], size=size_bytes(r.get("size")), publish_time=r.get("createdAt"),
+                            magnet=r.get("magnet"), source=self.name) for r in rows[:self.limit]]
+            pagination = data.get("pagination")
+            if not rows or not isinstance(pagination, dict) or pagination.get("complete") is not False:
+                break
+            if pagination.get("page", page) != page:
+                break
 
 
 class BangumiMoe(Source):
@@ -51,6 +68,9 @@ class RssSource(Source):
     parameter = ""
     parameters = {}
 
+    def include_item(self, fields):
+        return True
+
     def parse(self, content):
         root = ET.fromstring(content)
         if root.tag != "rss":
@@ -58,12 +78,15 @@ class RssSource(Source):
         if root.find("channel") is None:
             raise ValueError("RSS 缺少 channel")
         items = []
-        for element in root.findall("./channel/item")[:self.limit]:
+        # A search feed may already contain older releases beyond its first page of items.
+        for element in root.findall("./channel/item")[:self.limit * MAX_SEARCH_PAGES]:
             fields = {}
             for child in element.iter():
                 name = child.tag.rsplit("}", 1)[-1].lower()
                 if child.text:
                     fields.setdefault(name, child.text.strip())
+            if not self.include_item(fields):
+                continue
             enclosure = element.find("enclosure")
             torrent = enclosure.get("url") if enclosure is not None else None
             length = enclosure.get("length") if enclosure is not None else None
