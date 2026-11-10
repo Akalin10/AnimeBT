@@ -9,6 +9,7 @@ import httpx
 try:
     from animebt.gui.bt_resources import BTResources, _CatalogSearchService, collect_resources, resource_rows, subject_episodes
     from PySide6.QtCore import QPersistentModelIndex
+    from animebt.gui.resource_list import ResourceFilterModel, ResourceListModel
     from animebt.gui.series_resources import SeriesMatcher, load_series
 except ModuleNotFoundError as error:
     if error.name != "PySide6":
@@ -33,6 +34,31 @@ BUNDLE = "[组] 系列动画 [S1+S2] + 系列动画 雪之章 + 系列动画 冰
 
 def matcher(subject):
     return SeriesMatcher(subject, WORKS, TV, [])
+
+
+class ResourceListTest(unittest.TestCase):
+    def test_updates_preserve_existing_indexes_and_active_filters(self):
+        model = ResourceListModel(None)
+        filtered = ResourceFilterModel(model, model)
+        resets = []
+        model.modelReset.connect(lambda: resets.append(True))
+
+        first = {"key": "first", "resolution": "1080p"}
+        second = {"key": "second", "resolution": "720p"}
+        third = {"key": "third", "resolution": "1080p"}
+        model.update_rows([first, second])
+        filtered.setFilters("", "", "1080p", "")
+        anchor = QPersistentModelIndex(filtered.index(0, 0))
+        updated = dict(first, sources="Anime Garden / Nyaa")
+        model.update_rows([third, second, updated])
+        self.assertEqual(filtered.rowCount(), 2)
+        self.assertEqual(anchor.row(), 1)
+        self.assertEqual(anchor.data(model.resource_role), updated)
+
+        model.update_rows([dict(third, resolution="720p"), updated])
+        self.assertEqual(filtered.rowCount(), 1)
+        self.assertEqual(anchor.row(), 0)
+        self.assertEqual(resets, [])
 
 
 class SeriesAttributionTest(unittest.TestCase):
@@ -74,6 +100,29 @@ class SeriesAttributionTest(unittest.TestCase):
             "劇場版「進擊的巨人」完結篇 THE LAST ATTACK / Shingeki no Kyojin Movie [1080p]"
         )).work_ids, {508708})
         self.assertEqual(resource_rows([Resource(movie["title"] + "[片尾彩蛋][1080p]")], context), [])
+
+    def test_same_name_movie_uses_title_year_without_matching_undated_tv(self):
+        movie = dict(TV, id=5118, title="阿基拉", original="AKIRA",
+                     platform="剧场版", episodes=1, date="1988-07-16")
+        tv = dict(TV, id=285819, title="阿基拉", original="AKIRA", episodes=0)
+        works = {work["id"]: work for work in (movie, tv)}
+        films = SeriesMatcher(movie, works, movie, [])
+        television = SeriesMatcher(tv, {tv["id"]: tv}, tv, [], [movie])
+        for title in (
+            "阿基拉 Akira(1988)[BDRIP][1920x1080][movie][x264_m4a][10bit]加刘景长压制",
+            "Akira.1988.Movie.1080p.BluRay.x264.2Audio.1080p-CalChi",
+            "Akira _ 阿基拉(1988) 25th Anniversary Edition [1080p][5.1][Tri-Audio][Hi10p]",
+        ):
+            with self.subTest(title=title):
+                self.assertEqual(films.classify(Resource(title)).work_ids, {5118})
+                self.assertFalse(television.classify(Resource(title)).work_ids)
+        for title in ("AKIRA [1080p]", "AKIRA (2020) [1080p]", "AKIRA (1988) [OVA][1080p]",
+                      "AKIRA (1988) [片尾彩蛋][1080p]", "AKIRA S01E01 [1080p]"):
+            with self.subTest(title=title):
+                self.assertNotIn(5118, films.classify(Resource(title)).work_ids)
+        other_movie = dict(movie, id=3, date="")
+        ambiguous = SeriesMatcher(movie, works, movie, [], [other_movie])
+        self.assertFalse(ambiguous.classify(Resource("AKIRA [1988] [1080p]")).work_ids)
 
     def test_mini_and_bonus_do_not_match_tv_or_another_mini_season(self):
         first = {"id": 7, "title": "系列动画 休息时间", "original": "Series Break Time",
