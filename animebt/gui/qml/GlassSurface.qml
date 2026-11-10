@@ -13,14 +13,12 @@ Item {
     property bool compact: false
     property bool renderOptics: true
     property real radius: 14
-    property real shine: 0
     property bool focused: false
     property color outline: focused ? optics.focusColor : "transparent"
     property color tint: optics.tint
     readonly property bool refracting: optics.enabled && renderOptics
     readonly property int requestedTier: visible && refracting ? backdropTier : GlassSurface.Ambient
     property int registeredTier: GlassSurface.Ambient
-    property real lightLevel: shine
 
     onRequestedTierChanged: {
         optics.changeConsumers(registeredTier, -1)
@@ -28,7 +26,6 @@ Item {
         registeredTier = requestedTier
     }
     Component.onDestruction: if (optics) optics.changeConsumers(registeredTier, -1)
-    Behavior on lightLevel { NumberAnimation { duration: glass.optics.motion; easing.type: Easing.OutCubic } }
 
     Rectangle {
         anchors.fill: parent
@@ -56,7 +53,6 @@ Item {
             property real tintAmount: glass.optics.tintAmount
             property real blurRadius: glass.optics.blurRadius
             property real refraction: glass.optics.refraction
-            property real highlight: glass.optics.highlight + 0.36 * glass.lightLevel
             property real compact: glass.compact ? 1 : 0
             property real panel: glass.readingPanel ? 1 : 0
             property vector2d readingRange: glass.readable ? glass.optics.readingRange : Qt.vector2d(0, 1)

@@ -38,6 +38,19 @@ def subject_summary(row):
     if not isinstance(subject_id, int) or subject_id <= 0 or not (original or chinese):
         return None
 
+    aliases = []
+    alias_languages = {}
+    for item in row.get("infobox") or []:
+        key = item.get("key")
+        if key not in {"别名", "英文名", "罗马字", "罗马音", "羅馬字"}:
+            continue
+        values = item.get("value")
+        for value in values if isinstance(values, list) else [values]:
+            name = value.get("v") if isinstance(value, dict) else value
+            if isinstance(name, str) and name.strip():
+                aliases.append(name)
+                if key != "别名":
+                    alias_languages[name] = "latin" if key == "英文名" else "romaji"
     season = ""
     match = SEASON_MARKER.search(chinese) or SEASON_MARKER.search(original)
     if match:
@@ -66,12 +79,8 @@ def subject_summary(row):
         "season": season,
         "cover": covers[0] if covers else "",
         "coverAlternatives": covers[1:],
-        "aliases": [
-            value if isinstance(value, str) else value["v"]
-            for item in row.get("infobox") or [] if item.get("key") in ("别名", "英文名", "罗马字")
-            for value in (item["value"] if isinstance(item.get("value"), list) else [item.get("value")])
-            if isinstance(value, str) or isinstance(value, dict) and isinstance(value.get("v"), str)
-        ],
+        "aliases": aliases,
+        "aliasLanguages": alias_languages,
         "date": row.get("date") or "",
         "episodes": row.get("eps") or 0,
         "platform": row.get("platform") or "",
@@ -145,6 +154,10 @@ class BangumiSearch(QObject):
     @Property("QVariantList", notify=changed)
     def results(self):
         return self._results
+
+    @Property("QVariantList", notify=changed)
+    def candidates(self):
+        return self._primary if self._status == "loading" else self._results
 
     @Property(str, notify=changed)
     def status(self):
@@ -353,7 +366,7 @@ class BangumiSearch(QObject):
 
     @Slot(int)
     def select(self, subject_id):
-        selected = next((row for row in self._results if row["id"] == subject_id), None)
+        selected = next((row for row in self.candidates if row["id"] == subject_id), None)
         if selected is not None:
             self._selected = selected
             self.selectionChanged.emit()

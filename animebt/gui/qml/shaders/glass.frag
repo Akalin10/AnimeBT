@@ -13,7 +13,6 @@ layout(std140, binding = 0) uniform GlassUniforms {
     float tintAmount;
     float blurRadius;
     float refraction;
-    float highlight;
     float compact;
     float dim;
     float panel;
@@ -68,10 +67,7 @@ void main()
     rgb = mix(rgb, clamp(rgb, glass.readingRange.x, glass.readingRange.y), protectedCenter);
     float tint = mix(glass.tintAmount, 1.0, 0.42 * protectedCenter);
     rgb = mix(rgb, glass.tintColor.rgb / max(0.001, glass.tintColor.a), tint);
-    float specular = rim * (0.035 + 0.19 * max(0.0, dot(normal, vec2(-0.6, -0.8))));
-    float edge = smoothstep(-2.0, -0.5, d) * mask;
-    rgb = mix(rgb, vec3(1.0), clamp((specular + 0.11 * edge) * glass.highlight, 0.0, 1.0));
-    rgb = mix(clamp(rgb, glass.readingRange.x, glass.readingRange.y), rgb, edge);
+    rgb = clamp(rgb, glass.readingRange.x, glass.readingRange.y);
 
     float alpha = mask * glass.qt_Opacity;
     fragColor = vec4(rgb * alpha, alpha);

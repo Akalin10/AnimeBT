@@ -1,7 +1,7 @@
 """Bangumi series context and release-title evidence used by the GUI."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 
 import httpx
@@ -11,7 +11,8 @@ from animebt.core.matching import _normalize
 from .bangumi import SEASON_MARKER, subject_summary
 from .resource_match import (
     EDITION_YEAR, EPISODE_LABEL, EXPLICIT_TOTAL, MIXED_PACK, SubjectMatcher,
-    episode_label, episode_title_terms, name_parts, numbers, phrase_pattern, release_tail, season_numbers, split_parts,
+    episode_label, episode_title_terms, name_parts, numbers, phrase_pattern, recorded_ova_subtitle,
+    release_tail, season_numbers, shared_series_names, split_parts,
 )
 
 
@@ -37,6 +38,8 @@ MINI_MARKER = re.compile(
 )
 MINI_THEATER = re.compile(r"q\s*版剧场|ちみキャラ[剧劇][场場]")
 NON_VIDEO = re.compile(r"\bost\b|原声(?:集|带)|漫画|\b(?:manga|soundtrack)\b")
+MUSIC_RELEASE = re.compile(r"(?:op|ed)\s*(?:主題歌|主题歌|テーマ)|插入歌|挿入歌"
+                           r"|\bmp3\b|(?<!\d)320\s*k(?:bps)?\b")
 VIDEO_RELEASE = re.compile(r"\b(?:web[- ]?(?:rip|dl)|bd(?:rip|mv)?|bluray|mkv|mp4|hevc|avc)\b")
 BONUS_ONLY = re.compile(r"片[头尾]彩蛋|(?:片[头尾]|映后)特典|(?:无字|无字幕)片[头尾]|\bnc(?:op|ed)\b")
 MEMBER_JOIN = re.compile(r"^\s*[-–—]?\s*[\])}]*\s*[+&、]")
@@ -103,11 +106,12 @@ async def load_series(client, subject, catalog, cache, refresh=False):
                              or season_numbers((row.get("name") or "") + " " + (row.get("name_cn") or "")))]
 
             async def hydrate(entry_id, row):
-                entry = available.get(entry_id)
-                if not entry or not entry.get("platform"):
+                entry = known.get(entry_id) or available.get(entry_id)
+                if not entry or not entry.get("platform") or entry_id == selected_id and not entry.get("aliases"):
                     async with semaphore:
                         detail = await bangumi_json(client, f"subjects/{entry_id}", cache, refresh)
-                    entry = subject_summary(detail) if isinstance(detail, dict) else None
+                    if isinstance(detail, dict):
+                        entry = subject_summary(detail) or entry
                 known[entry_id] = entry or subject_summary(row)
 
             async with asyncio.TaskGroup() as tasks:
@@ -120,6 +124,8 @@ async def load_series(client, subject, catalog, cache, refresh=False):
                                 extra.create_task(hydrate(entry_id, row))
 
                 initial = dict(list(related.items())[:16])
+                if not subject.get("aliases"):
+                    tasks.create_task(hydrate(selected_id, {}))
                 for entry_id, row in initial.items():
                     if entry_id != selected_id:
                         tasks.create_task(hydrate(entry_id, row))
@@ -131,6 +137,12 @@ async def load_series(client, subject, catalog, cache, refresh=False):
         known.setdefault(entry_id, available.get(entry_id) or subject_summary(row))
     works = {entry_id: entry for entry_id, entry in known.items() if entry}
     root = works.get(parents.get(selected_id)) or works.get(current) or subject
+    if work_kind(subject) == "tv" and root["id"] != selected_id and not shared_series_names(subject, [root]):
+        predecessor = next((works[entry_id] for entry_id in related if entry_id in visited
+                            and entry_id in works and work_kind(works[entry_id]) in {"", "tv"}
+                            and shared_series_names(subject, [works[entry_id]])), None)
+        if predecessor:
+            root = predecessor
     return works, root, parents
 
 
@@ -243,6 +255,7 @@ def cumulative_range(title):
 class Attribution:
     work_ids: frozenset[int]
     bundle: bool = False
+    rejection: str = field(default="", compare=False)
 
     def category(self, subject_id):
         if subject_id in self.work_ids:
@@ -325,6 +338,19 @@ class SeriesMatcher:
         self.names = [(pattern, ids, official.get(name, set())) for name, ids in owners.items()
                       if (pattern := phrase_pattern(name))]
         self.names.extend((pattern, ids, ids) for pattern, ids in separated_names.items())
+        self.ova_subtitles = []
+        for entry_id, work in works.items():
+            if self.kinds[entry_id] != "ova":
+                continue
+            stem, subtitle = recorded_ova_subtitle(work)
+            subtitle = _normalize(subtitle)
+            # Both canonical names record the subtitle even when the relation
+            # endpoint fails. A bare series name still proves nothing.
+            if subtitle and not any(
+                subtitle in name for other_id, other in strict_context.items()
+                if other_id != entry_id for name in strong_names(other)
+            ):
+                self.ova_subtitles.append((entry_id, phrase_pattern(_normalize(stem)), phrase_pattern(subtitle)))
         self.mini_subtitles = [(phrase_pattern(name), entry_id) for name, ids in mini_subtitles.items()
                                if len(ids) == 1 for entry_id in ids if entry_id in works]
         self.root_title_patterns = [phrase_pattern(name) for name in strong_names(root)]
@@ -338,16 +364,36 @@ class SeriesMatcher:
             or (entry_id == subject["id"] and not self.kinds[entry_id] and not work.get("platform")
                 and (self.seasons[entry_id] or episodes))
         }
+        self.plain_predecessors = {
+            entry_id: {
+                other_id for other_id, work in works.items()
+                if self.kinds[other_id] in {"", "tv"} and not self.seasons[other_id]
+                and any(_normalize(name) in self.bases[entry_id] for name in (work["title"], work["original"]) if name)
+            }
+            for entry_id in self.tv_matchers if self.seasons[entry_id]
+        }
         self.cache = {}
         self.schedules = {}
+        self.episode_names = []
+        self.add_subject_episodes(episodes)
+
+    def add_subject_episodes(self, episodes):
+        if not episodes:
+            return
+        entry_id = self.subject["id"]
+        if entry_id in self.tv_matchers:
+            self.tv_matchers[entry_id].add_episode_dates(episodes)
+        elif not self.kinds[entry_id] and not self.subject.get("platform"):
+            self.tv_matchers[entry_id] = SubjectMatcher(self.subject, self.context.values(), episodes)
         self.episode_names = [pattern for name in episode_title_terms(episodes)
                               if (pattern := phrase_pattern(_normalize(name)))]
-        self.add_schedule(subject["id"], episodes)
+        self.add_schedule(entry_id, episodes)
 
     def add_schedule(self, entry_id, episodes):
         if episodes:
-            self.schedules[entry_id] = {row["sort"] for row in episodes
-                                        if isinstance(row.get("sort"), (int, float))}
+            self.schedules.setdefault(entry_id, set()).update(
+                row["sort"] for row in episodes if isinstance(row.get("sort"), (int, float))
+            )
             self.cache.clear()
 
     def season_works(self, seasons):
@@ -394,8 +440,10 @@ class SeriesMatcher:
 
     def _classify(self, resource):
         title = _normalize(resource.title)
-        if NON_VIDEO.search(title) and not resource.metadata.resolution and not re.search(r"\bbd(?:rip|mv)?\b", title):
-            return Attribution(frozenset())
+        if (NON_VIDEO.search(title) or MUSIC_RELEASE.search(title)) and not (
+            resource.metadata.resolution or VIDEO_RELEASE.search(title)
+        ):
+            return Attribution(frozenset(), rejection="非视频发布")
 
         local = numbers(EPISODE_LABEL.fullmatch(episode_label(resource)))
         total = numbers(EXPLICIT_TOTAL.search(title))
@@ -407,6 +455,15 @@ class SeriesMatcher:
         confirmed = set()
         video = bool(resource.metadata.resolution or VIDEO_RELEASE.search(title))
         if video and not BONUS_ONLY.search(title):
+            for entry_id, stem, subtitle in self.ova_subtitles:
+                count = self.works[entry_id].get("episodes", 0)
+                if (season_markers or any(pattern.search(title) for pattern in
+                                          (EXTRAS, SP_MARKER, WEB_MARKER, MINI_MARKER, NON_VIDEO))
+                        or count and local and local.stop - 1 > count
+                        or any(official and entry_id not in ids for _, _, ids, official in mentions)):
+                    continue
+                if any(stem.search(title[:match.start()]) for match in subtitle.finditer(title)):
+                    confirmed.add(entry_id)
             for subtitle, entry_id in self.mini_subtitles:
                 for match in subtitle.finditer(title):
                     prefix = title[:match.start()]
@@ -503,8 +560,11 @@ class SeriesMatcher:
         # Unqualified series names and ambiguous aliases cannot identify an extra.
         if not mixed and not season_pack:
             for entry_id, matcher in self.tv_matchers.items():
+                generic_predecessors = (self.plain_predecessors.get(entry_id, set())
+                                        if season_markers == self.seasons[entry_id] else set())
                 if any(entry_id not in ids and official and
-                       not (ids == {root_id} and self.bases[entry_id].intersection(self.bases[root_id]))
+                       not (ids == {root_id} and self.bases[entry_id].intersection(self.bases[root_id])
+                            or ids <= generic_predecessors)
                        for _, _, ids, official in mentions):
                     continue
                 identical = set().union(*(official for _, _, _, official in mentions if entry_id in official))
@@ -536,4 +596,18 @@ class SeriesMatcher:
 
         bundle = bool(PACK_WORD.search(title) or season_pack or len(local) > 1 or len(total) > 1
                       or len(confirmed) > 1)
-        return Attribution(frozenset(confirmed), bundle)
+        rejection = ""
+        if not confirmed:
+            if not mentions:
+                rejection = "标题缺少可验证作品名"
+            elif season_markers and self.seasons[self.subject["id"]] and not (
+                season_markers & self.seasons[self.subject["id"]]
+            ):
+                rejection = "季度标记与目标冲突"
+            elif total or season_pack:
+                rejection = "累计集数或合集成员证据不足"
+            elif mixed:
+                rejection = "特殊篇、剧场版或混合集合证据不足"
+            else:
+                rejection = "作品名歧义或缺少分段、集数及日期证据"
+        return Attribution(frozenset(confirmed), bundle, rejection)

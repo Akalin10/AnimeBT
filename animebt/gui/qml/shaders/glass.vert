@@ -12,7 +12,6 @@ layout(std140, binding = 0) uniform GlassUniforms {
     float tintAmount;
     float blurRadius;
     float refraction;
-    float highlight;
     float compact;
     float dim;
     float panel;

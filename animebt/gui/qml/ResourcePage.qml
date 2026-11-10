@@ -383,7 +383,7 @@ Item {
 
             Text {
                 Layout.fillWidth: true
-                visible: page.backend.subject.platform === "TV" && !page.backend.scheduleAvailable
+                visible: !page.backend.loading && page.backend.subject.platform === "TV" && !page.backend.scheduleAvailable
                 text: "Bangumi 正片排期不可用，部分季度或分段只能凭明确的标题标记确认。"
                 color: colors.warning
                 font.pixelSize: 12
@@ -481,7 +481,6 @@ Item {
                     renderOptics: entry.inViewport
                     radius: 12
                     tint: page.assistant.background(colors.dark, rowHover.hovered)
-                    shine: rowHover.hovered ? 0.55 : 0
                 }
 
                 MouseArea {

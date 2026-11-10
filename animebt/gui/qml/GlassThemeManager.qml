@@ -21,7 +21,6 @@ QtObject {
     readonly property real tintAmount: 0.16 + 0.77 * level
     readonly property real blurRadius: 0.65 + 4.0 * level
     readonly property real refraction: 18 - 6 * level
-    readonly property real highlight: 0.86 - 0.16 * level
     readonly property real modalDim: 0.32
     readonly property vector2d readingRange: colors.dark ? Qt.vector2d(0, 0.27) : Qt.vector2d(0.86, 1)
 

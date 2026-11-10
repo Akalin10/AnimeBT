@@ -38,6 +38,5 @@ Item {
         readingPanel: true
         readingPlate: true
         tint: frame.colors.controlBase
-        shine: 0.30
     }
 }

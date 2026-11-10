@@ -29,12 +29,15 @@ Window {
     readonly property bool animate: appearance.animations
     readonly property int motion: animate ? 160 : 0
     readonly property int navigationDuration: animate ? 330 : 0
+    property bool startupMotionAllowed: false
+    property bool startupActive: false
     required property QtObject catalog
     required property QtObject resourceSearch
     required property QtObject titleAssistant
     property bool showSearchHome: false
     readonly property bool hasSearched: !showSearchHome && catalog.status !== "idle"
-    readonly property bool scrollCatalogHeader: hasSearched && !resourceSearch.active
+    readonly property bool scrollCatalogHeader: hasSearched
+    readonly property bool catalogLoading: hasSearched && (catalog.status === "loading" || resourceSearch.catalogChecking)
     readonly property var posterWidths: [120, 160, 200, 240]
     readonly property int posterStep: Math.max(0, Math.min(posterWidths.length - 1, appearance.posterSizeStep))
     property Item posterOrigin: null
@@ -52,9 +55,13 @@ Window {
         location: window.appearanceLocation
         property bool darkMode: false
         property bool animations: true
+        property bool startupAnimation: true
         property int posterSizeStep: 2
     }
-    Component.onCompleted: posterGrid.preferredWidth = posterWidths[posterStep]
+    Component.onCompleted: {
+        posterGrid.preferredWidth = posterWidths[posterStep]
+        startupActive = startupMotionAllowed && appearance.startupAnimation && appearance.animations
+    }
     GlassThemeManager {
         id: glassOptics
         objectName: "glassThemeManager"
@@ -130,7 +137,7 @@ Window {
         const oldY = page.contentY
         const gridY = Math.max(0, oldY - posterGrid.y)
         const oldRow = Math.floor(gridY / oldPitch)
-        const anchor = Math.max(0, Math.min(oldRow * posterGrid.columnCount, resourceSearch.catalogResults.length - 1))
+        const anchor = Math.max(0, Math.min(oldRow * posterGrid.columnCount, posterGrid.subjectCount - 1))
         const offset = gridY / oldPitch - oldRow
         page.cancelFlick()
         posterGrid.preferredWidth = target
@@ -153,7 +160,7 @@ Window {
         appearance.posterSizeStep = step
         appearance.setValue("posterSizeStep", step)
         appearance.sync()
-        if (!animate || resourceSearch.catalogResults.length === 0) {
+        if (!animate || posterGrid.subjectCount === 0) {
             settlePosterReflow()
         } else if (!shrinkPosters.running) {
             growPosters.stop()
@@ -256,13 +263,13 @@ Window {
     Connections {
         target: window.catalog
         function onChanged() {
-            if (!window.showSearchHome && window.catalog.status === "ready")
-                window.resourceSearch.verifyCatalog(window.catalog.results)
+            if (!window.showSearchHome)
+                window.resourceSearch.extendCatalog(window.catalog.candidates, window.catalog.status !== "loading")
         }
         function onSelectionChanged() {
             const selected = window.catalog.selected
             if (selected.id !== undefined) {
-                window.resourceSearch.openSubject(selected, window.catalog.results)
+                window.resourceSearch.openSubject(selected, window.catalog.candidates)
                 if (window.flightWaiting) {
                     const serial = window.navigationSerial
                     Qt.callLater(function() {
@@ -314,9 +321,10 @@ Window {
             optics: glassOptics
             radius: 12
             visible: control.floating || control.hovered || control.visualFocus
-            shine: control.down ? 1.4 : control.hovered ? 0.8 : 0
             focused: control.visualFocus
-            tint: control.destructive && control.hovered ? themeColors.dangerFill : glassOptics.tint
+            tint: control.destructive && control.hovered ? themeColors.dangerFill
+                : control.down ? themeColors.controlPressed
+                : control.hovered ? themeColors.controlHover : glassOptics.tint
         }
     }
 
@@ -397,7 +405,7 @@ Window {
                 x: surface.width - width - 30
                 y: Math.max(20, (surface.height - height) * 0.28)
                 scale: Math.min(1, (surface.height - 40) / height)
-                glow: themeColors.blueGlow
+                glow: themeColors.accentGlow
             }
             LightPool {
                 width: Math.min(440, surface.width * 0.64)
@@ -438,6 +446,8 @@ Window {
         anchors.margins: window.frameInset
         radius: window.frameRadius
         color: "transparent"
+        visible: !window.startupActive || (startupLayer.item && startupLayer.item.revealing)
+        enabled: !window.startupActive
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
@@ -560,7 +570,7 @@ Window {
             parent: window.scrollCatalogHeader ? page.contentItem : surface
             z: 3
             width: surface.width
-            height: catalogHeader.y + catalogHeader.height + 24
+            height: searchArea.y + searchArea.height + (searchStatus.visible ? searchStatus.height + 8 : 0)
 
             Item {
                 id: searchArea
@@ -616,7 +626,6 @@ Window {
                         optics: glassOptics
                         radius: 30
                         focused: searchField.activeFocus
-                        shine: searchField.hovered || searchField.activeFocus ? 0.85 : 0
                     }
 
                     Glyph {
@@ -676,7 +685,6 @@ Window {
                                 : searchButton.down ? themeColors.controlPressed
                                 : searchButton.hovered ? themeColors.controlHover : themeColors.controlSelected
                             focused: searchButton.visualFocus
-                            shine: searchButton.down ? 1.35 : searchButton.hovered ? 0.8 : 0
                         }
                     }
                 }
@@ -693,147 +701,42 @@ Window {
                 topLeftRadius: window.frameRadius
                 topRightRadius: window.frameRadius
                 color: glassOptics.readingColor(themeColors.controlBase)
-                opacity: catalogHeader.opacity
+                opacity: window.hasSearched && !window.resourceSearch.active ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: window.motion } }
                 visible: opacity > 0
             }
 
-            ColumnLayout {
-                id: catalogHeader
-                objectName: "catalogHeader"
+            Text {
+                id: searchStatus
+                objectName: "searchStatus"
                 z: 3
                 x: window.contentInset
                 anchors.top: searchArea.bottom
                 width: surface.width - 2 * x
-                opacity: window.hasSearched && !window.resourceSearch.active ? 1 : 0
-                visible: opacity > 0
-                enabled: !window.resourceSearch.active
-                spacing: 6
-                Behavior on opacity { NumberAnimation { duration: window.motion } }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 1
-                    color: themeColors.softLine
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 10
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 3
-                        Text {
-                            text: "Bangumi 搜索"
-                            color: window.ink
-                            font.pixelSize: window.width < 800 ? 21 : 24
-                            font.weight: Font.Bold
-                        }
-                        Text {
-                            objectName: "searchStatus"
-                            Layout.fillWidth: true
-                            text: {
-                                switch (window.catalog.status) {
-                                case "loading": return window.catalog.primaryCount > 0
-                                    ? "已找到 " + window.catalog.primaryCount + " 部 · 正在处理后续结果…"
-                                    : "正在搜索「" + window.catalog.keyword + "」…"
-                                case "ready":
-                                    const count = window.resourceSearch.catalogResults.length
-                                    if (count || window.resourceSearch.catalogChecking)
-                                        return ""
-                                    if (window.resourceSearch.catalogCancelled)
-                                        return "已取消搜索"
-                                    if (window.resourceSearch.catalogIncomplete)
-                                        return "部分来源未能完成搜索，暂未确认 BT 资源"
-                                    return "未找到有确认 BT 资源的动画"
-                                case "empty": return "未找到匹配的动画，试试日文原名或更短的关键词。"
-                                case "cancelled": return "已取消搜索"
-                                case "error": return window.catalog.error
-                                default: return ""
-                                }
-                            }
-                            visible: text.length > 0
-                            textFormat: Text.PlainText
-                            color: window.muted
-                            font.pixelSize: 13
-                            wrapMode: Text.Wrap
-                        }
-                    }
-                    BusyIndicator {
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
-                        visible: (window.catalog.status === "loading" || window.resourceSearch.catalogChecking)
-                            && window.animate
-                        running: visible
-                    }
-                    Slider {
-                        id: posterSize
-                        objectName: "posterSizeSlider"
-                        visible: window.catalog.status === "ready"
-                        Layout.preferredWidth: 184
-                        Layout.preferredHeight: 38
-                        from: 0
-                        to: window.posterWidths.length - 1
-                        stepSize: 1
-                        snapMode: Slider.SnapAlways
-                        value: window.posterStep
-                        leftPadding: 10
-                        rightPadding: 68
-                        Accessible.name: "海报尺寸"
-                        Accessible.description: window.posterWidths[Math.round(value)] + " 像素"
-                        onMoved: window.changePosterStep(Math.round(value))
-                        background: GlassSurface {
-                            optics: glassOptics
-                            radius: 13
-                            focused: posterSize.visualFocus
-                            shine: posterSize.hovered || posterSize.pressed ? 0.85 : 0
-                            Rectangle {
-                                x: posterSize.leftPadding + 7
-                                y: (parent.height - height) / 2
-                                width: posterSize.availableWidth - 14
-                                height: 2
-                                radius: 1
-                                color: themeColors.line
-                                Repeater {
-                                    model: window.posterWidths.length
-                                    Rectangle {
-                                        required property int index
-                                        x: index * parent.width / (window.posterWidths.length - 1) - width / 2
-                                        y: (parent.height - height) / 2
-                                        width: 5
-                                        height: 5
-                                        radius: 2.5
-                                        color: themeColors.accent
-                                    }
-                                }
-                            }
-                            Text {
-                                anchors.right: parent.right
-                                anchors.rightMargin: 11
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: window.posterWidths[Math.round(posterSize.value)] + " px"
-                                color: themeColors.ink
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                            }
-                        }
-                        handle: Rectangle {
-                            x: posterSize.leftPadding + posterSize.visualPosition * (posterSize.availableWidth - width)
-                            y: (posterSize.height - height) / 2
-                            width: 14
-                            height: 14
-                            radius: 7
-                            color: posterSize.pressed ? themeColors.accentPressed : themeColors.accentFill
-                            border.color: themeColors.frame
-                            Behavior on x { NumberAnimation { duration: posterSize.pressed ? 0 : window.motion; easing.type: Easing.OutCubic } }
-                        }
-                        GlassToolTip {
-                            colors: themeColors
-                            optics: glassOptics
-                            text: "海报尺寸 · " + window.posterWidths.join(" / ") + " px"
-                            visible: posterSize.hovered && !posterSize.pressed
-                            delay: 650
-                        }
+                height: text.length > 0 ? implicitHeight : 0
+                text: {
+                    switch (window.catalog.status) {
+                    case "loading": return ""
+                    case "ready":
+                        const count = posterGrid.subjectCount
+                        if (count || window.resourceSearch.catalogChecking)
+                            return ""
+                        if (window.resourceSearch.catalogCancelled)
+                            return "已取消搜索"
+                        if (window.resourceSearch.catalogIncomplete)
+                            return "部分来源未能完成搜索，暂未确认 BT 资源"
+                        return "未找到有确认 BT 资源的动画"
+                    case "empty": return "未找到匹配的动画，试试日文原名或更短的关键词。"
+                    case "cancelled": return "已取消搜索"
+                    case "error": return window.catalog.error
+                    default: return ""
                     }
                 }
+                visible: window.hasSearched && text.length > 0 && !window.resourceSearch.active
+                textFormat: Text.PlainText
+                color: window.muted
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
             }
         }
 
@@ -849,7 +752,7 @@ Window {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 12
-            contentHeight: catalogTop.height + posterGrid.height + 8
+            contentHeight: posterGrid.y + posterGrid.height + 8
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
@@ -864,11 +767,13 @@ Window {
             PosterGrid {
                 id: posterGrid
                 x: window.contentInset
-                y: catalogTop.height
+                y: catalogTop.height + 12
                 width: page.width - 2 * x
                 motion: window.motion
                 catalog: window.catalog
-                subjects: window.resourceSearch.catalogResults
+                subjects: window.resourceSearch.catalogModel
+                loading: window.catalogLoading
+                animateLoading: window.animate && backdropLayer.hardware
                 colors: themeColors
                 optics: glassOptics
                 viewportY: page.contentY - y
@@ -1006,6 +911,93 @@ Window {
                         appearance.sync()
                     }
                 }
+                Switch {
+                    objectName: "startupAnimationSwitch"
+                    text: "启动动画"
+                    checked: appearance.startupAnimation
+                    onToggled: {
+                        appearance.startupAnimation = checked
+                        appearance.setValue("startupAnimation", checked)
+                        appearance.sync()
+                    }
+                }
+                RowLayout {
+                    width: parent.width
+                    spacing: 12
+                    Text {
+                        Layout.fillWidth: true
+                        text: "海报尺寸"
+                        color: window.ink
+                        font.pixelSize: 13
+                    }
+                    Slider {
+                        id: posterSize
+                        objectName: "posterSizeSlider"
+                        Layout.preferredWidth: 184
+                        Layout.preferredHeight: 38
+                        from: 0
+                        to: window.posterWidths.length - 1
+                        stepSize: 1
+                        snapMode: Slider.SnapAlways
+                        value: window.posterStep
+                        leftPadding: 10
+                        rightPadding: 68
+                        Accessible.name: "海报尺寸"
+                        Accessible.description: window.posterWidths[Math.round(value)] + " 像素"
+                        onMoved: window.changePosterStep(Math.round(value))
+                        background: GlassSurface {
+                            optics: glassOptics
+                            radius: 13
+                            focused: posterSize.visualFocus
+                            Rectangle {
+                                x: posterSize.leftPadding + 7
+                                y: (parent.height - height) / 2
+                                width: posterSize.availableWidth - 14
+                                height: 2
+                                radius: 1
+                                color: themeColors.line
+                                Repeater {
+                                    model: window.posterWidths.length
+                                    Rectangle {
+                                        required property int index
+                                        x: index * parent.width / (window.posterWidths.length - 1) - width / 2
+                                        y: (parent.height - height) / 2
+                                        width: 5
+                                        height: 5
+                                        radius: 2.5
+                                        color: themeColors.accent
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 11
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: window.posterWidths[Math.round(posterSize.value)] + " px"
+                                color: themeColors.ink
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                        handle: Rectangle {
+                            x: posterSize.leftPadding + posterSize.visualPosition * (posterSize.availableWidth - width)
+                            y: (posterSize.height - height) / 2
+                            width: 14
+                            height: 14
+                            radius: 7
+                            color: posterSize.pressed ? themeColors.accentPressed : themeColors.accentFill
+                            border.color: themeColors.frame
+                            Behavior on x { NumberAnimation { duration: posterSize.pressed ? 0 : window.motion; easing.type: Easing.OutCubic } }
+                        }
+                        GlassToolTip {
+                            colors: themeColors
+                            optics: glassOptics
+                            text: "海报尺寸 · " + window.posterWidths.join(" / ") + " px"
+                            visible: posterSize.hovered && !posterSize.pressed
+                            delay: 650
+                        }
+                    }
+                }
                 GlassButton {
                     objectName: "titleAssistantSettings"
                     colors: themeColors
@@ -1054,9 +1046,31 @@ Window {
         }
     }
 
+    Loader {
+        id: startupLayer
+        parent: sceneContent
+        anchors.fill: surface
+        z: 1
+        active: window.startupActive
+        sourceComponent: Splash {
+            colors: themeColors
+            radius: window.frameRadius
+            onFinished: window.startupActive = false
+        }
+    }
+
+    Connections {
+        target: window
+        enabled: window.startupActive
+        function onFrameSwapped() {
+            if (startupLayer.item)
+                startupLayer.item.start()
+        }
+    }
+
     Shortcut {
         sequence: "Ctrl+F"
-        enabled: !window.resourceSearch.active
+        enabled: !window.startupActive && !window.resourceSearch.active
         onActivated: {
             if (window.scrollCatalogHeader) {
                 page.cancelFlick()

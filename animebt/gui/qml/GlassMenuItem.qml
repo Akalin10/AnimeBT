@@ -38,7 +38,6 @@ MenuItem {
              : entry.highlighted || entry.hovered ? entry.colors.controlHover
              : entry.selected ? entry.colors.controlSelected : entry.colors.controlBase
         focused: entry.visualFocus || entry.highlighted
-        shine: entry.hovered ? 0.65 : 0
         Glyph {
             visible: entry.selected
             anchors.right: parent.right

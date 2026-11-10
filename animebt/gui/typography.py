@@ -111,8 +111,9 @@ def apply_system_typography(app):
     installed = {family.casefold(): family for family in QFontDatabase.families()}
     english = _preferred(installed, ("Anthropic Serif Web Text", "Anthropic Serif Web"), LATIN)
     japanese_english = _preferred(installed, ("Anthropic Serif Web", "Anthropic Serif Web Text"), LATIN)
+    jiangcheng = _preferred(installed, ("江城圆体", "江城圆体 500W"), CHINESE)
     pingfang = _preferred(installed, ("PingFang SC", "苹方-简", "萍方-简"), CHINESE)
-    families = (pingfang, primary, chinese, traditional, base.familyName())
+    families = (jiangcheng, pingfang, primary, chinese, traditional, base.familyName())
     font.setFamilies(list(dict.fromkeys(filter(None, (english, *families, japanese)))))
     japanese_font = QFont(font)
     # A distinct installed alias keeps Qt's Japanese fallback cache separate.

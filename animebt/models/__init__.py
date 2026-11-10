@@ -7,7 +7,9 @@ from .title import parse_title
 
 
 def normalize_hash(value: str | None) -> str | None:
-    value = (value or "").strip()
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
     if re.fullmatch(r"[0-9a-fA-F]{40}", value):
         return value.lower()
     if re.fullmatch(r"[A-Za-z2-7]{32}", value):
@@ -16,7 +18,9 @@ def normalize_hash(value: str | None) -> str | None:
 
 
 def magnet_hash(magnet: str | None) -> str | None:
-    for xt in parse_qs(urlsplit(magnet or "").query).get("xt", []):
+    if not isinstance(magnet, str) or not magnet.lower().startswith("magnet:?"):
+        return None
+    for xt in parse_qs(urlsplit(magnet).query).get("xt", []):
         if xt.lower().startswith("urn:btih:"):
             return normalize_hash(xt[9:])
     return None
@@ -43,6 +47,9 @@ class Resource:
     info_hash: str | None = None
     source: str = ""
     sources: list[str] = field(default_factory=list)
+    source_id: str | None = None
+    query: str = ""
+    origins: list[list[str]] = field(default_factory=list)
 
     @cached_property
     def metadata(self):

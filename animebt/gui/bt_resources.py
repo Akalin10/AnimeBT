@@ -1,34 +1,37 @@
 """Bridge the GUI to the existing asyncio BT search service."""
 
 import asyncio
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import replace
 from hashlib import sha256
 import re
-from threading import Event
+from threading import Event, Lock
 
 import httpx
-from PySide6.QtCore import QObject, Property, QRunnable, QThreadPool, Qt, Signal, Slot
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Property, QRunnable, QThreadPool, Qt, Signal, Slot
 
 from animebt.config import Settings
 from animebt.core.dedupe import deduplicate
-from animebt.core.results import display_date, filter_sort
-from animebt.core.runtime import record_error
+from animebt.core.results import display_date, filter_sort, publication_date
+from animebt.core.runtime import logger, record_error
 from animebt.core.search import SearchService
 from animebt.sources import SOURCE_TYPES
 from animebt.sources.foreign_anime import EXTRA_SOURCE_TYPES
 
-from .resource_match import episode_label, search_names, season_numbers, supplementary_names
+from .resource_match import (
+    episode_label, search_names, season_numbers, supplementary_names,
+)
 from .resource_actions import ResourceActions, valid_magnet
 from .source_settings import DEFAULT_TIMEOUTS
 from .series_resources import (
-    SeriesMatcher, bundled_seasons, cumulative_range, distinguishing_suffixes, load_series, merge_attributions, work_kind,
+    SeriesMatcher, bundled_seasons, cumulative_range, load_series, merge_attributions, work_kind,
 )
+from .search_plan import plan_queries
 from .title_spans import parse_display_title
 
 
 SOURCE_BUDGET_SECONDS = 28
-CATALOG_WORKERS = 2
+CATALOG_WORKERS = 3
 
 
 class _Confirmed(Exception):
@@ -36,39 +39,52 @@ class _Confirmed(Exception):
         self.rows = rows
 
 
-def subtitle_queries(subject, kind):
-    if kind not in {"movie", "ova", "mini", "sp"}:
-        return []
-    names = [subject["title"], subject["original"]]
-    queries = []
-    for name in names:
-        parts = re.split(r"[!！~～〜]", name)
-        if len(parts) > 1:
-            suffix = next((part.strip() for part in reversed(parts[1:]) if part.strip()), "")
-            if len(re.sub(r"[\W_]", "", suffix)) >= 4:
-                queries.append(suffix)
-    return list(dict.fromkeys(queries))
-
-
-async def subject_episodes(client, subject_id):
-    rows = []
-    try:
-        for _ in range(5):
+async def fetch_episode_page(client, subject_id, offset, limit=100):
+    reason = "invalid response"
+    for _ in range(2):
+        try:
             response = await client.get(
                 "https://api.bgm.tv/v0/episodes",
-                params={"subject_id": subject_id, "type": 0, "limit": 100, "offset": len(rows)},
-                timeout=8,
+                params={"subject_id": subject_id, "type": 0, "limit": limit, "offset": offset},
+                timeout=6,
             )
             response.raise_for_status()
             data = response.json()
-            page = data["data"]
-            if not isinstance(page, list) or not all(isinstance(row, dict) for row in page):
+            page, total = data["data"], data["total"]
+            if isinstance(total, int) and isinstance(page, list) and all(isinstance(row, dict) for row in page):
+                return page, total
+            break
+        except httpx.HTTPStatusError as error:
+            reason = f"HTTP {error.response.status_code}"
+            if error.response.status_code < 500:
                 break
-            rows.extend(page)
-            if not page or len(rows) >= data["total"]:
-                break
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-        pass
+        except httpx.RequestError as error:
+            reason = type(error).__name__
+            continue
+        except (ValueError, KeyError, TypeError):
+            break
+    logger.info("Bangumi episodes unavailable subject=%s offset=%s limit=%s reason=%s",
+                subject_id, offset, limit, reason)
+    return None
+
+
+async def subject_episodes(client, subject_id, cache=None):
+    initial = await fetch_episode_page(client, subject_id, 0)
+    if initial is None:
+        return []
+    first, total = initial
+    if not first:
+        return []
+    page_size = len(first)
+    offsets = set(range(page_size, min(total, page_size * 5), page_size))
+    # Long-running shows still need real broadcast dates for recent releases.
+    last = (total - 1) // page_size * page_size
+    if last >= page_size * 5:
+        offsets.update((last - page_size, last))
+    pages = await asyncio.gather(*(fetch_episode_page(client, subject_id, offset) for offset in sorted(offsets)))
+    rows = first + [row for page in pages if page is not None for row in page[0]]
+    if cache is not None and all(page is not None for page in pages):
+        cache[subject_id] = rows
     return rows
 
 
@@ -76,8 +92,9 @@ def resource_rows(resources, matcher=None):
     by_hash = {}
     if matcher:
         for resource in resources:
+            attribution = matcher.classify(resource)
             if resource.info_hash:
-                by_hash.setdefault(resource.info_hash, []).append((resource, matcher.classify(resource)))
+                by_hash.setdefault(resource.info_hash, []).append((resource, attribution))
     rows = []
     for resource in filter_sort(deduplicate(resources)):
         if matcher and resource.info_hash:
@@ -115,6 +132,7 @@ def resource_rows(resources, matcher=None):
             "size": resource.display_size,
             "date": display_date(resource.publish_time),
             "sources": " / ".join(resource.sources),
+            "provenance": resource.origins,
             "magnet": resource.magnet or "",
             "torrent_url": resource.torrent_url or "",
             "info_hash": resource.info_hash or "",
@@ -132,32 +150,68 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
     supplemental = kind in {"ova", "sp", "mini", "web"} or bool(
         subject.get("platform") and kind not in {"tv", "movie"}
     )
-    written_names = supplementary_names(subject, ())
-    subtitle_terms = subtitle_queries(subject, kind)
     candidates_by_source = {}
     status_by_source = {}
+    final_counts = Counter()
+    final_states = {}
+    preview_pages = asyncio.Queue()
+    episode_rows = []
 
     async def load_episodes():
         subject_id = subject["id"]
         if not refresh and episode_cache is not None and subject_id in episode_cache:
             rows = episode_cache[subject_id]
         else:
-            rows = await subject_episodes(service.client, subject_id)
-            if rows and episode_cache is not None:
-                episode_cache[subject_id] = rows
+            rows = await subject_episodes(service.client, subject_id, episode_cache)
         return rows
 
     async def load_matcher():
-        (works, root, _), rows = await asyncio.gather(
-            load_series(service.client, subject, siblings, series_cache if series_cache is not None else {}, refresh),
-            load_episodes(),
+        works, root, _ = await load_series(
+            service.client, subject, siblings, series_cache if series_cache is not None else {}, refresh,
         )
-        return SeriesMatcher(subject, works, root, rows, siblings), rows
+        matcher = SeriesMatcher(works[subject["id"]], works, root, [], siblings)
+        if tv := matcher.tv_matchers.get(subject["id"]):
+            tv.schedule_pending = True
+        return matcher
 
     matching = asyncio.create_task(load_matcher())
     schedule_jobs = {}
+    targeted_jobs = {}
 
-    async def add_ranges(matcher, candidates):
+    async def load_schedule():
+        rows = await load_episodes()
+        matcher = await asyncio.shield(matching)
+        episode_rows.extend(rows)
+        matcher.add_subject_episodes(rows)
+        if tv := matcher.tv_matchers.get(subject["id"]):
+            tv.schedule_pending = False
+        matcher.cache.clear()
+        publish(matcher)
+
+    def add_targeted_episodes(matcher, candidates):
+        subject_id = subject["id"]
+        tv = matcher.tv_matchers.get(subject_id)
+        if tv is None or tv.seasons:
+            return
+        offsets = set()
+        for item in candidates:
+            number = episode_label(item)
+            if (number.isdecimal() and 500 < int(number) <= 9999 and not tv.by_local.get(int(number))
+                    and publication_date(item.publish_time)):
+                offsets.add((int(number) - 1) // 20 * 20)
+
+        async def fill(offset):
+            page = await fetch_episode_page(service.client, subject_id, offset, limit=20)
+            if page:
+                tv.add_episode_dates(page[0])
+                matcher.add_schedule(subject_id, page[0])
+                preview_pages.put_nowait((None, ()))
+
+        for offset in sorted(offsets, reverse=True):
+            if offset not in targeted_jobs and len(targeted_jobs) < 2:
+                targeted_jobs[offset] = asyncio.create_task(fill(offset))
+
+    def add_ranges(matcher, candidates):
         seasons = set()
         for item in candidates:
             if len(cumulative_range(item.title)) > 1:
@@ -169,113 +223,243 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
         async def add_schedule(entry_id):
             rows = episode_cache.get(entry_id) if not refresh and episode_cache is not None else None
             if rows is None:
-                async with asyncio.timeout(5):
-                    rows = await subject_episodes(service.client, entry_id)
-                if rows and episode_cache is not None:
-                    episode_cache[entry_id] = rows
+                try:
+                    async with asyncio.timeout(5):
+                        rows = await subject_episodes(service.client, entry_id, episode_cache)
+                except TimeoutError:
+                    return
             matcher.add_schedule(entry_id, rows)
+            preview_pages.put_nowait((None, ()))
 
         for entry_id in needed:
             if entry_id not in schedule_jobs and len(schedule_jobs) < 4:
                 schedule_jobs[entry_id] = asyncio.create_task(add_schedule(entry_id))
-        if needed:
-            await asyncio.shield(asyncio.gather(
-                *(schedule_jobs[entry_id] for entry_id in needed if entry_id in schedule_jobs),
-                return_exceptions=True,
-            ))
 
-    async def run_source(name):
-        extended_source = name in DEFAULT_TIMEOUTS
+    def remember(name, items, matcher):
+        stored = candidates_by_source.setdefault(name, {})
+        previous_count = len(stored)
+        for item in items:
+            key = (item.info_hash, item.title, item.size, item.publish_time, item.magnet, item.torrent_url)
+            if previous := stored.get(key):
+                origins = [list(origin) for origin in dict.fromkeys(map(tuple, previous.origins + item.origins))]
+                if origins != previous.origins:
+                    stored[key] = replace(previous, origins=origins)
+            else:
+                stored[key] = item
+        if len(stored) != previous_count:
+            publish(matcher)
+            add_targeted_episodes(matcher, items)
+            add_ranges(matcher, items)
+
+    async def run_source(source):
+        name = source.name
         tried = []
-        candidates = []
+        attempts = []
+        errors = []
+        limited = []
         status, error = "无结果", ""
+
+        async def query(keyword):
+            tried.append(keyword)
+            try:
+                result = await service.search(keyword, selected=[name], refresh=refresh,
+                                              collect=True, page_budget=12 if refresh else 4 if first_match else 6,
+                                              on_page=lambda page: preview_pages.put_nowait((name, page)))
+            except asyncio.CancelledError:
+                logger.info("BT query interrupted subject=%s source=%s keyword=%r", subject["id"], name, keyword)
+                raise
+            items = result.candidates or result.resources
+            attempts.append((keyword, result, items))
+            if reason := result.errors.get(name):
+                errors.append(reason)
+            if reason := result.incomplete.get(name):
+                limited.append(reason)
+            matcher = await asyncio.shield(matching)
+            remember(name, items, matcher)
+            return result.statuses.get(name, "无结果"), result.errors.get(name, "")
+
+        query_tasks = []
         try:
-            async with asyncio.timeout(SOURCE_BUDGET_SECONDS):
-                use_written = kind == "movie" or (extended_source and supplemental)
-                initial = written_names if use_written and written_names else terms
-                for keyword in initial[:1]:
-                    tried.append(keyword)
-                    result = await service.search(keyword, selected=[name], refresh=refresh)
-                    candidates.extend(result.resources)
-                    status = result.statuses.get(name, "无结果")
-                    error = result.errors.get(name, "")
-                matcher, episodes = await asyncio.shield(matching)
-                await add_ranges(matcher, candidates)
-                check_first(candidates, matcher)
-                root_terms = search_names(matcher.root)
-                root_keyword = root_terms[0] if root_terms else ""
-                if supplemental:
-                    chapter_terms = [name for name in supplementary_names(subject, episodes) if name not in written_names]
-                    suffixes = distinguishing_suffixes(subject, matcher.root)
-                    fallback = [*written_names[:2], *subtitle_terms, *suffixes[:1], *chapter_terms[:1],
-                                *written_names[2:3], root_keyword, *suffixes[1:], *written_names[3:], *root_terms[1:]]
-                elif kind == "movie":
-                    fallback = [*subtitle_terms, *written_names, *terms, root_keyword, *root_terms[1:]]
-                else:
-                    fallback = [root_keyword, *terms[1:], *root_terms[1:]]
-                unique = dict.fromkeys(word for word in fallback if word and word not in tried)
-                fallback = list(unique)
-                for keyword in fallback[:5 if supplemental else 3]:
-                    if error:
-                        break
-                    if not supplemental and keyword != root_keyword and resource_rows(candidates, matcher):
-                        break
-                    tried.append(keyword)
-                    result = await service.search(keyword, selected=[name], refresh=refresh)
-                    candidates.extend(result.resources)
-                    await add_ranges(matcher, result.resources)
-                    check_first(candidates, matcher)
-                    status = result.statuses.get(name, "无结果")
-                    error = result.errors.get(name, "")
+            async with asyncio.timeout(60 if refresh else SOURCE_BUDGET_SECONDS):
+                initial = subject["title"] or next(iter(terms), "")
+                if initial:
+                    query_tasks.append(asyncio.create_task(query(initial)))
+                matcher = await asyncio.shield(matching)
+                budget = 11 if refresh else 6
+                planned = plan_queries(source, matcher, episode_rows, kind, initial=initial, budget=budget + 1)
+                if len(planned) > budget:
+                    limited.append("达到别名预算")
+                aliases = iter(planned[:budget])
+
+                def blocked():
+                    return any(reason.startswith(("HTTP 401,", "HTTP 429,")) for reason in errors)
+
+                async def run_aliases():
+                    nonlocal status, error
+                    for keyword in aliases:
+                        if blocked():
+                            break
+                        status, error = await query(keyword)
+
+                # The preferred query starts with metadata loading. A second lane can
+                # make progress while that query pages or waits on a slow connection.
+                query_tasks.append(asyncio.create_task(run_aliases()))
+                if initial:
+                    status, error = await query_tasks[0]
+                query_tasks.append(asyncio.create_task(run_aliases()))
+                await asyncio.gather(*query_tasks)
+                if supplemental and len(tried) <= budget and not blocked():
+                    await asyncio.shield(schedule)
+                    written = supplementary_names(matcher.subject, ())
+                    chapter = next((name for name in supplementary_names(matcher.subject, episode_rows)
+                                    if name not in written and name.casefold() not in {word.casefold() for word in tried}), None)
+                    if chapter:
+                        status, error = await query(chapter)
         except _Confirmed:
             raise
         except TimeoutError:
             status, error = "超时", "名称补查超过时间上限"
+            errors.append(error)
         except Exception as exc:
             record_error(f"GUI 来源搜索失败 [{name}]", exc)
             status, error = "失败", "来源返回的资源无法处理"
-        matcher, schedule = await asyncio.shield(matching)
-        candidates_by_source[name] = candidates
+            errors.append(error)
+        finally:
+            for task in query_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*query_tasks, return_exceptions=True)
+            matcher = matching.result() if matching.done() and not matching.cancelled() and not matching.exception() else None
+            for keyword, result, items in attempts:
+                accepted = [item for item in items if matcher and matcher.classify(item).category(subject["id"])]
+                logger.info(
+                    "BT query subject=%s source=%s keyword=%r raw=%s candidates=%s matched=%s dedup=%s eligible=%s status=%s error=%r",
+                    subject["id"], name, keyword, result.raw_counts.get(name, "unknown"), result.counts.get(name, 0),
+                    len(accepted) if matcher else "unknown", len(deduplicate(accepted)) if matcher else "unknown",
+                    result.eligible_counts.get(name, "unknown"), result.statuses.get(name), result.errors.get(name, ""),
+                )
+            if errors:
+                logger.info("BT source errors subject=%s source=%s status=%s reasons=%r",
+                            subject["id"], name, status, list(dict.fromkeys(errors)))
+        matcher = await asyncio.shield(matching)
         status_by_source[name] = {
             "name": name,
             "status": status,
-            "error": error,
+            "error": "；".join(dict.fromkeys(errors)),
             "keywords": " / ".join(tried),
+            "limited": "；".join(dict.fromkeys(limited)),
+            "raw": sum(result.raw_counts.get(name, 0) for _, result, _ in attempts),
         }
-        rows = resource_rows([item for group in candidates_by_source.values() for item in group], matcher)
+        if first_match:
+            update([], {name: dict(status_by_source[name], error=status_by_source[name]["error"] or
+                                   status_by_source[name]["limited"])}, bool(episode_rows))
+            return
+        publish(matcher)
+
+    def publish(matcher):
+        candidates = [item for group in candidates_by_source.values() for item in group.values()]
+        if first_match:
+            check_first(candidates, matcher)
+            return
+        rows = resource_rows(candidates, matcher)
         counts = Counter(source for row in rows for source in row["sources"].split(" / "))
+        final_counts.clear()
+        final_counts.update(counts)
         statuses = {}
-        for source, state in status_by_source.items():
+        for source in candidates_by_source.keys() | status_by_source.keys():
+            state = status_by_source.get(source)
             count = counts[source]
+            if state is None:
+                statuses[source] = {"name": source, "count": count, "status": "搜索中", "error": "", "keywords": ""}
+                continue
             if state["error"]:
-                status = "部分结果" if count else "超时" if state["status"] == "超时" else "失败"
+                status = ("部分结果" if count else "搜索未完成"
+                          if state["status"] == "超时" or candidates_by_source.get(source) else "来源失败")
+            elif state["limited"]:
+                status = "部分结果" if count else "检索范围有限"
+            elif count:
+                status = "成功"
             else:
-                status = "成功" if count else "无结果"
+                status = ("归属未确认" if candidates_by_source.get(source)
+                          else "已查范围无确认资源" if state["raw"] else "来源返回零条")
             statuses[source] = dict(state, count=count, status=status)
-        update(rows, statuses, bool(schedule))
+            final_states[source] = status
+        update(rows, statuses, bool(episode_rows))
 
     def check_first(candidates, matcher):
-        if first_match:
+        if first_match and any(matcher.classify(item).category(subject["id"]) for item in candidates):
             rows = [row for row in resource_rows(candidates, matcher)
                     if valid_magnet(row["magnet"], row["info_hash"])
                     or row["torrent_url"].startswith(("https://", "http://"))]
             if rows:
                 raise _Confirmed(rows)
 
+    async def check_pages():
+        matcher = await asyncio.shield(matching)
+        while True:
+            name, page = await preview_pages.get()
+            if name is None:
+                publish(matcher)
+            else:
+                remember(name, page, matcher)
+
+    async def run_sources(preview):
+        async with asyncio.TaskGroup() as tasks:
+            for source in service.sources:
+                tasks.create_task(run_source(source))
+        preview.cancel()
+        await schedule
+        await asyncio.gather(*schedule_jobs.values(), *targeted_jobs.values())
+        publish(await asyncio.shield(matching))
+
     proof = []
     try:
         async with asyncio.TaskGroup() as tasks:
-            for source in service.sources:
-                tasks.create_task(run_source(source.name))
+            schedule = tasks.create_task(load_schedule())
+            preview = tasks.create_task(check_pages())
+            tasks.create_task(run_sources(preview))
     except* _Confirmed as confirmed:
-        proof = confirmed.exceptions[0].rows
+        signal = confirmed
+        while isinstance(signal, BaseExceptionGroup):
+            signal = signal.exceptions[0]
+        proof = signal.rows
     finally:
         if not matching.done():
             matching.cancel()
-        for job in schedule_jobs.values():
+        metadata_jobs = (*schedule_jobs.values(), *targeted_jobs.values())
+        for job in metadata_jobs:
             if not job.done():
                 job.cancel()
-        await asyncio.gather(matching, *schedule_jobs.values(), return_exceptions=True)
+        await asyncio.gather(matching, *metadata_jobs, return_exceptions=True)
+    if first_match:
+        for source in service.sources:
+            state = status_by_source.get(source.name)
+            logger.info("BT catalog final subject=%s source=%s status=%s limits=%r error=%r",
+                        subject["id"], source.name, state["status"] if state else "确认存在后结束其余核验",
+                        state["limited"] if state else None, state["error"] if state else None)
+    else:
+        matcher = matching.result()
+        all_hits = [item for group in candidates_by_source.values() for item in group.values()]
+        hashes = {}
+        for item in all_hits:
+            if item.info_hash:
+                hashes.setdefault(item.info_hash, []).append(matcher.classify(item))
+        conflicts = {key for key, evidence in hashes.items()
+                     if any(item.work_ids for item in evidence) and not merge_attributions(evidence).work_ids}
+        for name, state in status_by_source.items():
+            accepted = 0
+            rejected = Counter()
+            for item in candidates_by_source.get(name, {}).values():
+                evidence = matcher.classify(item)
+                if item.info_hash in conflicts:
+                    rejected["同一 Info Hash 的镜像归属冲突"] += 1
+                elif subject["id"] in evidence.work_ids:
+                    accepted += 1
+                else:
+                    rejected["已证实属于其他作品" if evidence.work_ids else evidence.rejection] += 1
+            logger.info("BT source final subject=%s source=%s keywords=%r accepted=%s rejected=%r dedup=%s "
+                        "status=%s limits=%r error=%r", subject["id"], name, state["keywords"],
+                        accepted, dict(rejected), final_counts[name], final_states[name], state["limited"], state["error"])
     return proof
 
 
@@ -284,20 +468,37 @@ class _CatalogSearchService(SearchService):
         super().__init__(*args, **kwargs)
         self._queries = {}
         self._waiters = Counter()
+        self._page_listeners = {}
+        self._received_pages = {}
 
-    async def search(self, keyword, selected=None, refresh=False):
-        key = keyword, tuple(selected or ())
+    async def search(self, keyword, selected=None, refresh=False, *, on_page=None, **options):
+        key = keyword, tuple(selected or ()), refresh, tuple(sorted(options.items()))
+
+        def publish_page(page):
+            self._received_pages[key].append(page)
+            for listener in self._page_listeners[key]:
+                listener(page)
+
         if key not in self._queries:
-            self._queries[key] = asyncio.create_task(super().search(keyword, selected, refresh))
+            self._page_listeners[key] = set()
+            self._received_pages[key] = []
+            self._queries[key] = asyncio.create_task(super().search(keyword, selected, refresh, on_page=publish_page, **options))
         task = self._queries[key]
         self._waiters[key] += 1
         try:
+            if on_page is not None:
+                self._page_listeners[key].add(on_page)
+                for page in self._received_pages[key]:
+                    on_page(page)
             return await asyncio.shield(task)
         finally:
+            self._page_listeners[key].discard(on_page)
             self._waiters[key] -= 1
             if not self._waiters[key]:
                 del self._waiters[key]
                 del self._queries[key]
+                del self._received_pages[key]
+                del self._page_listeners[key]
                 if not task.done():
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
@@ -312,10 +513,13 @@ class _CatalogSearchService(SearchService):
 
 class CatalogJob(QRunnable):
     def __init__(self, directory, subjects, episode_cache, series_cache, extra_timeouts,
-                 generation, progress, finished):
+                 generation, progress, finished, *, complete=True):
         super().__init__()
         self.directory = directory
-        self.subjects = subjects
+        self._subjects = list(subjects)
+        self._remaining = deque(subjects)
+        self._complete = complete
+        self._lock = Lock()
         self.episode_cache = episode_cache
         self.series_cache = series_cache
         self.extra_timeouts = extra_timeouts
@@ -324,17 +528,28 @@ class CatalogJob(QRunnable):
         self.finished = finished
         self.cancelled = Event()
 
+    def extend(self, subjects, complete):
+        with self._lock:
+            self._subjects.extend(subjects)
+            self._remaining.extend(subjects)
+            self._complete = complete
+
     async def search(self):
         settings = Settings()
         settings.sources.extend(self.extra_timeouts)
         service = _CatalogSearchService(settings, self.directory, source_types=[*SOURCE_TYPES, *EXTRA_SOURCE_TYPES],
                                         source_timeouts=self.extra_timeouts)
-        remaining = iter(self.subjects)
-
         async def worker():
-            for subject in remaining:
-                if self.cancelled.is_set():
-                    return
+            while not self.cancelled.is_set():
+                with self._lock:
+                    subject = self._remaining.popleft() if self._remaining else None
+                    complete = self._complete
+                    siblings = tuple(self._subjects) if subject else ()
+                if subject is None:
+                    if complete:
+                        return
+                    await asyncio.sleep(0.05)
+                    continue
                 statuses = {}
 
                 def update(_rows, states, _schedule):
@@ -342,7 +557,7 @@ class CatalogJob(QRunnable):
 
                 try:
                     proof = await collect_resources(
-                        service, subject, self.subjects, update, episode_cache=self.episode_cache,
+                        service, subject, siblings, update, episode_cache=self.episode_cache,
                         series_cache=self.series_cache, first_match=True,
                     )
                     incomplete = not proof and any(state["error"] for state in statuses.values())
@@ -422,6 +637,44 @@ class SearchJob(QRunnable):
             self.finished.emit(self.generation, error)
 
 
+class CatalogPosterModel(QAbstractListModel):
+    countChanged = Signal()
+    subject_role = Qt.ItemDataRole.UserRole + 1
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.subjects = []
+
+    @Property(int, notify=countChanged)
+    def count(self):
+        return len(self.subjects)
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.subjects)
+
+    def roleNames(self):
+        return {self.subject_role: b"subject"}
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if index.isValid() and role == self.subject_role and 0 <= index.row() < len(self.subjects):
+            return self.subjects[index.row()]
+        return None
+
+    def append(self, subject):
+        row = len(self.subjects)
+        self.beginInsertRows(QModelIndex(), row, row)
+        self.subjects.append(subject)
+        self.endInsertRows()
+        self.countChanged.emit()
+
+    def clear(self):
+        if self.subjects:
+            self.beginResetModel()
+            self.subjects.clear()
+            self.endResetModel()
+            self.countChanged.emit()
+
+
 class BTResources(QObject):
     changed = Signal()
     catalogChanged = Signal()
@@ -442,6 +695,8 @@ class BTResources(QObject):
         self._catalog_job = None
         self._catalog_generation = 0
         self._catalog_subjects = []
+        self._catalog_by_id = {}
+        self._catalog_model = CatalogPosterModel(self)
         self._catalog_proofs = {}
         self._catalog_checked = 0
         self._catalog_incomplete = 0
@@ -466,7 +721,11 @@ class BTResources(QObject):
 
     @Property("QVariantList", notify=catalogResultsChanged)
     def catalogResults(self):
-        return [subject for subject in self._catalog_subjects if subject["id"] in self._catalog_proofs]
+        return list(self._catalog_model.subjects)
+
+    @Property(QObject, constant=True)
+    def catalogModel(self):
+        return self._catalog_model
 
     @Property(bool, notify=catalogChanged)
     def catalogChecking(self):
@@ -496,18 +755,33 @@ class BTResources(QObject):
     @Slot("QVariantList")
     def verifyCatalog(self, subjects):
         self.cancelCatalog()
-        self._catalog_subjects = subjects
+        self._catalog_subjects = []
+        self._catalog_by_id = {}
         self._catalog_proofs = {}
+        self._catalog_model.clear()
         self._catalog_checked = self._catalog_incomplete = 0
         self._catalog_cancelled = False
-        if subjects:
-            self._catalog_job = CatalogJob(
-                self._directory, subjects, self._episode_cache, self._series_cache, self._extra_timeouts,
-                self._catalog_generation, self._catalogProgress, self._catalogFinished,
-            )
-            self._catalog_pool.start(self._catalog_job)
+        self.extendCatalog(subjects, True)
         self.catalogResultsChanged.emit()
         self.catalogChanged.emit()
+
+    @Slot("QVariantList", bool)
+    def extendCatalog(self, subjects, complete):
+        added = []
+        for subject in subjects:
+            if subject["id"] not in self._catalog_by_id:
+                self._catalog_by_id[subject["id"]] = subject
+                added.append(subject)
+        self._catalog_subjects.extend(added)
+        if self._catalog_job is not None:
+            self._catalog_job.extend(added, complete)
+        elif added:
+            self._catalog_job = CatalogJob(
+                self._directory, added, self._episode_cache, self._series_cache, self._extra_timeouts,
+                self._catalog_generation, self._catalogProgress, self._catalogFinished, complete=complete,
+            )
+            self._catalog_pool.start(self._catalog_job)
+            self.catalogChanged.emit()
 
     @Slot(int, object)
     def _receive_catalog_progress(self, generation, update):
@@ -516,8 +790,9 @@ class BTResources(QObject):
         subject_id, proof, incomplete = update
         self._catalog_checked += 1
         self._catalog_incomplete += incomplete
-        if proof:
+        if proof and subject_id not in self._catalog_proofs and subject_id in self._catalog_by_id:
             self._catalog_proofs[subject_id] = proof
+            self._catalog_model.append(self._catalog_by_id[subject_id])
             self.catalogResultsChanged.emit()
         self.catalogChanged.emit()
 

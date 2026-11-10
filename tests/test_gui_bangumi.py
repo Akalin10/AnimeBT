@@ -118,6 +118,10 @@ class BangumiSearchTest(unittest.TestCase):
         primary = [self.anchor, *({"id": n, "name": f"条目 {n}"} for n in range(1, 20))]
         self.finish(network.replies[0], {"data": primary, "total": 22})
         self.assertIn("offset=20", network.offsets[1])
+        self.assertEqual(search.status, "loading")
+        self.assertEqual([row["id"] for row in search.candidates], [55770, *range(1, 20)])
+        search.select(55770)
+        self.assertEqual(search.selected["id"], 55770)
         sequel = {"id": 508708, "name": "剧场版 进击的巨人 完结篇"}
         self.finish(network.replies[2], {"data": [sequel, {"id": 100, "name": "进击的巨人"}]})
         self.finish(network.replies[3], {"data": []})
@@ -127,6 +131,7 @@ class BangumiSearchTest(unittest.TestCase):
         self.finish(network.replies[1], {"data": [primary[-1], sequel, {"id": 200, "name": "四格动画"}]})
         self.assertEqual(search.primaryCount, 22)
         self.assertEqual([row["id"] for row in search.results[-3:]], [508708, 200, 100])
+        self.assertEqual(search.candidates, search.results)
 
     def test_cancel_during_supplement_keeps_primary_and_ignores_all_late_replies(self):
         network = ControlledNetwork()
