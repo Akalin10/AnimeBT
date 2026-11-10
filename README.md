@@ -4,8 +4,6 @@
   <img src="animebt/gui/assets/icon.png" width="72" alt="AnimeBT 拉姆图标">
 </p>
 
-AnimeBT 是一个动画 BT 资源检索工具，提供 Windows 图形界面（GUI）和终端界面（TUI）。
-
 [下载 Windows x64 版](https://github.com/Akalin10/AnimeBT/releases/download/v1.1.0/AnimeBT-1.1.0-Windows-x64.zip) · [Releases](https://github.com/Akalin10/AnimeBT/releases) · [使用指南](docs/guide.md)
 
 ## 功能
