@@ -1,6 +1,8 @@
 # AnimeBT
 
-<img src="animebt/gui/assets/icon.png" width="72" alt="AnimeBT 拉姆图标">
+<p align="center">
+  <img src="animebt/gui/assets/icon.png" width="72" alt="AnimeBT 拉姆图标">
+</p>
 
 AnimeBT 是一个动画 BT 资源检索工具，提供 Windows 图形界面（GUI）和终端界面（TUI）。
 
