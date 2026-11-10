@@ -12,9 +12,11 @@ try {
     $app = Join-Path (Get-Location) 'dist\AnimeBT'
     Copy-Item -LiteralPath README.md,CHANGELOG.md,packaging\THIRD_PARTY.md -Destination $app
     $docs = Join-Path $app 'docs'
+    $assets = Join-Path $app 'animebt\gui\assets'
     $packageDocs = Join-Path $app 'packaging'
-    New-Item -ItemType Directory -Path $docs,$packageDocs -Force | Out-Null
-    Copy-Item -LiteralPath docs\search-audit.md,docs\screenshot.png -Destination $docs
+    New-Item -ItemType Directory -Path $docs,$assets,$packageDocs -Force | Out-Null
+    Copy-Item -LiteralPath docs\guide.md,docs\search-audit.md,docs\screenshot.png -Destination $docs
+    Copy-Item -LiteralPath animebt\gui\assets\icon.png -Destination $assets
     Copy-Item -LiteralPath docs\showcase -Destination $docs -Recurse
     Copy-Item -LiteralPath packaging\THIRD_PARTY.md -Destination $packageDocs
     & $buildPython tools/collect_notices.py $app
