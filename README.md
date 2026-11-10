@@ -4,7 +4,7 @@
   <img src="animebt/gui/assets/icon.png" width="72" alt="AnimeBT 拉姆图标">
 </p>
 
-[下载 Windows x64 版](https://github.com/Akalin10/AnimeBT/releases/download/v1.1.0/AnimeBT-1.1.0-Windows-x64.zip) · [Releases](https://github.com/Akalin10/AnimeBT/releases) · [使用指南](docs/guide.md)
+   [下载 Windows x64 版](https://github.com/Akalin10/AnimeBT/releases/download/v1.1.0/AnimeBT-1.1.0-Windows-x64.zip) · [Releases](https://github.com/Akalin10/AnimeBT/releases) · [使用指南](docs/guide.md)
 
 ## 功能
 
