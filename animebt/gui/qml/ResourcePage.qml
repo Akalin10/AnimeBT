@@ -32,31 +32,26 @@ Item {
     readonly property bool actionPopupOpen: resourceMenu.opened || saveDialog.visible
         || category.popupOpen || episode.popupOpen || resolution.popupOpen || fansub.popupOpen
 
-    readonly property var filtered: backend.rows.filter(row =>
-        (!categoryFilter || row.category === categoryFilter) &&
-        (!episodeFilter || row.episode === episodeFilter) &&
-        (!resolutionFilter || row.resolution === resolutionFilter) &&
-        (!fansubFilter || row.fansub === fansubFilter))
+    readonly property var facets: backend.facets
+    readonly property var categoryOptions: [{label: "全部 · " + facets.total, value: ""}]
+        .concat(["独立资源", "合集资源"].map(key =>
+            ({label: key + " · " + (facets.categories[key] || 0), value: key})))
 
-    readonly property var categoryCounts: {
-        const counts = {"独立资源": 0, "合集资源": 0}
-        for (const row of backend.rows)
-            counts[row.category]++
-        return counts
+    function applyFilters() {
+        backend.resourceModel.setFilters(categoryFilter, episodeFilter, resolutionFilter, fansubFilter)
     }
-    readonly property var categoryOptions: [{label: "全部 · " + backend.rows.length, value: ""}]
-        .concat(Object.keys(categoryCounts).map(key => ({label: key + " · " + categoryCounts[key], value: key})))
-
-    function animateFilter() {
+    function changeFilter() {
+        applyFilters()
         if (motion > 0) {
             filterOffset = 4
             filterMotion.restart()
         }
     }
-    onCategoryFilterChanged: animateFilter()
-    onEpisodeFilterChanged: animateFilter()
-    onResolutionFilterChanged: animateFilter()
-    onFansubFilterChanged: animateFilter()
+    onCategoryFilterChanged: changeFilter()
+    onEpisodeFilterChanged: changeFilter()
+    onResolutionFilterChanged: changeFilter()
+    onFansubFilterChanged: changeFilter()
+    Component.onCompleted: applyFilters()
     onMotionChanged: if (motion === 0) {
         filterMotion.stop()
         filterOffset = 0
@@ -71,7 +66,7 @@ Item {
     }
 
     function options(key, selected) {
-        const values = [...new Set(backend.rows.map(row => row[key]))]
+        const values = facets[key].slice()
         if (selected && !values.includes(selected))
             values.push(selected)
         values.sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true }))
@@ -152,12 +147,18 @@ Item {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.preferredHeight: 32
-            model: field.choices
             textRole: "label"
             valueRole: "value"
-            currentIndex: Math.max(0, field.choices.findIndex(option => option.value === field.selectedValue))
+            currentIndex: Math.max(0, (model || []).findIndex(option => option.value === field.selectedValue))
             onActivated: field.picked(currentValue)
             Accessible.name: field.label
+            Binding {
+                target: combo
+                property: "model"
+                value: field.choices
+                when: !field.popupOpen
+                restoreMode: Binding.RestoreNone
+            }
         }
     }
 
@@ -281,10 +282,10 @@ Item {
                                 Layout.fillWidth: true
                                 text: page.backend.error || (page.backend.loading
                                     ? "正在搜索 · 已完成 " + page.completedSources + "/" + page.backend.sources.length
-                                      + " 个来源 · 已确认 " + page.backend.rows.length + " 条"
-                                    : page.backend.rows.length
-                                      ? "已确认 " + page.backend.rows.length + " 条"
-                                        + " · 当前显示 " + page.filtered.length + " 条"
+                                      + " 个来源 · 已确认 " + page.facets.total + " 条"
+                                    : page.facets.total
+                                      ? "已确认 " + page.facets.total + " 条"
+                                        + " · 当前显示 " + list.count + " 条"
                                       : "未找到该作品的 BT 资源")
                                 textFormat: Text.PlainText
                                 elide: Text.ElideRight
@@ -445,7 +446,8 @@ Item {
             spacing: 6
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: page.filtered
+            model: page.backend.resourceModel
+            reuseItems: true
             ScrollBar.vertical: ScrollBar {
                 objectName: "resourceScrollBar"
                 policy: ScrollBar.AsNeeded
@@ -453,7 +455,8 @@ Item {
             delegate: Item {
                 id: entry
                 transform: Translate { y: page.filterOffset }
-                required property var modelData
+                required property var resource
+                readonly property var modelData: resource
                 readonly property var spans: modelData.titleSpans || []
                 readonly property bool inViewport: y + height > list.contentY && y < list.contentY + list.height
                 readonly property bool needsAssistant: page.highlightTitles && page.assistant.ready
@@ -613,7 +616,7 @@ Item {
             }
             Text {
                 anchors.centerIn: parent
-                visible: page.backend.rows.length > 0 && list.count === 0
+                visible: page.facets.total > 0 && list.count === 0
                 text: "没有符合当前筛选条件的资源。"
                 color: colors.muted
             }

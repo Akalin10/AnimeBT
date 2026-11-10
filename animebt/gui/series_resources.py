@@ -31,6 +31,10 @@ FINAL_SPLIT = re.compile(r"(?:完结[篇编]\s*|kanketsu[- ]hen\s+)(前[篇编]|
 SPLIT_JOIN = re.compile(r"^\s*[+&、]\s*(前[篇编]|后[篇编]|zenpen|kouhen)(?![a-z])")
 MOVIE_PREFIX = re.compile(r"^剧场版\s*")
 EXTRAS = re.compile(r"剧场版|电影版|总集篇|総集編|\b(?:movie|film|rebuild)\b")
+TITLE_YEAR = re.compile(
+    r"^[\s)\]}」』._-]*(?:\((19\d{2}|20\d{2})\)|\[(19\d{2}|20\d{2})\]"
+    r"|(19\d{2}|20\d{2})(?![a-z0-9]))"
+)
 WEB_MARKER = re.compile(r"\bona\b|动画短片")
 MINI_MARKER = re.compile(
     r"(?<![a-z0-9])(?:q\s*版|mini[- ]*(?:anime|theat(?:er|re))|chibi[- ]*(?:anime|theat(?:er|re))|break\s*time)"
@@ -483,13 +487,33 @@ class SeriesMatcher:
                         confirmed.update(sides[1] | sides[2])
         seen_tv = {}
         for index, (start, end, ids, official) in enumerate(mentions):
-            if len(ids) != 1:
-                continue
-            entry_id, = ids
-            if entry_id not in self.works:
-                continue
             next_start = mentions[index + 1][0] if index + 1 < len(mentions) else len(title)
             tail = title[end:next_start]
+            movie_edition_suffix = False
+            if len(ids) != 1:
+                # An explicit release year can distinguish a film from an undated TV
+                # adaptation, but cannot distinguish it from an undated film.
+                if not video or NON_VIDEO.search(title) or BONUS_ONLY.search(title):
+                    continue
+                if not (year_marker := TITLE_YEAR.match(tail)):
+                    continue
+                year = next(group for group in year_marker.groups() if group)
+                dated = {owner for owner in ids if self.context[owner].get("date", "")[:4] == year}
+                if len(dated) != 1:
+                    continue
+                entry_id, = dated
+                if (entry_id not in official or self.kinds.get(entry_id) != "movie"
+                        or any(not self.context[owner].get("date") and work_kind(self.context[owner]) != "tv"
+                               for owner in ids - dated)):
+                    continue
+                tail = tail[year_marker.end():].lstrip(" ._-")
+                movie_edition_suffix = EXTRAS.match(tail) or re.match(
+                    r"\d+(?:st|nd|rd|th) anniversary edition\b", tail
+                )
+            else:
+                entry_id, = ids
+            if entry_id not in self.works:
+                continue
             kind = self.kinds[entry_id]
             episode_named = entry_id == self.subject["id"] and any(
                 pattern.search(tail) for pattern in self.episode_names
@@ -498,7 +522,7 @@ class SeriesMatcher:
             video_suffix = video and re.match(
                 r"^[\s\[\](){}「」『』~〜-]*(?:sp\d+\b|生肉|无字幕|baha\b|b-global\b|cr\b|nhk\b)", tail
             )
-            if not (release_tail(tail.lstrip("~〜")) or MEMBER_JOIN.match(tail) or episode_named
+            if not (movie_edition_suffix or release_tail(tail.lstrip("~〜")) or MEMBER_JOIN.match(tail) or episode_named
                     or entry_id in official and (bilingual_title or video_suffix)):
                 continue
             if entry_id in self.tv_matchers:

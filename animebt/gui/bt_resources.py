@@ -22,6 +22,7 @@ from .resource_match import (
     episode_label, search_names, season_numbers, supplementary_names,
 )
 from .resource_actions import ResourceActions, valid_magnet
+from .resource_list import ResourceFilterModel, ResourceListModel
 from .source_settings import DEFAULT_TIMEOUTS
 from .series_resources import (
     SeriesMatcher, bundled_seasons, cumulative_range, load_series, merge_attributions, work_kind,
@@ -32,6 +33,7 @@ from .title_spans import parse_display_title
 
 SOURCE_BUDGET_SECONDS = 28
 CATALOG_WORKERS = 3
+DETAIL_UPDATE_INTERVAL = 0.1
 
 
 class _Confirmed(Exception):
@@ -121,7 +123,8 @@ def resource_rows(resources, matcher=None):
         spans, ambiguous = parse_display_title(resource.title, names)
         rows.append({
             "key": resource.info_hash or sha256(
-                repr((resource.title, resource.torrent_url, resource.magnet, resource.size, resource.source)).encode("utf-8")
+                repr((resource.title, resource.torrent_url, resource.magnet, resource.size,
+                      resource.source, resource.source_id, resource.publish_time)).encode("utf-8")
             ).hexdigest(),
             "title": resource.title,
             "titleSpans": [span.as_dict() for span in spans],
@@ -155,6 +158,7 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
     final_counts = Counter()
     final_states = {}
     preview_pages = asyncio.Queue()
+    detail_dirty = asyncio.Event()
     episode_rows = []
 
     async def load_episodes():
@@ -186,7 +190,7 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
         if tv := matcher.tv_matchers.get(subject["id"]):
             tv.schedule_pending = False
         matcher.cache.clear()
-        publish(matcher)
+        request_publish(matcher)
 
     def add_targeted_episodes(matcher, candidates):
         subject_id = subject["id"]
@@ -247,7 +251,7 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
             else:
                 stored[key] = item
         if len(stored) != previous_count:
-            publish(matcher)
+            request_publish(matcher)
             add_targeted_episodes(matcher, items)
             add_ranges(matcher, items)
 
@@ -354,7 +358,21 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
             update([], {name: dict(status_by_source[name], error=status_by_source[name]["error"] or
                                    status_by_source[name]["limited"])}, bool(episode_rows))
             return
-        publish(matcher)
+        request_publish(matcher)
+
+    def request_publish(matcher):
+        if first_match:
+            publish(matcher)
+        else:
+            detail_dirty.set()
+
+    async def publish_details():
+        matcher = await asyncio.shield(matching)
+        while True:
+            await detail_dirty.wait()
+            detail_dirty.clear()
+            publish(matcher)
+            await asyncio.sleep(DETAIL_UPDATE_INTERVAL)
 
     def publish(matcher):
         candidates = [item for group in candidates_by_source.values() for item in group.values()]
@@ -399,17 +417,19 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
         while True:
             name, page = await preview_pages.get()
             if name is None:
-                publish(matcher)
+                request_publish(matcher)
             else:
                 remember(name, page, matcher)
 
-    async def run_sources(preview):
+    async def run_sources(preview, detail_updates):
         async with asyncio.TaskGroup() as tasks:
             for source in service.sources:
                 tasks.create_task(run_source(source))
         preview.cancel()
         await schedule
         await asyncio.gather(*schedule_jobs.values(), *targeted_jobs.values())
+        if detail_updates is not None:
+            detail_updates.cancel()
         publish(await asyncio.shield(matching))
 
     proof = []
@@ -417,7 +437,8 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
         async with asyncio.TaskGroup() as tasks:
             schedule = tasks.create_task(load_schedule())
             preview = tasks.create_task(check_pages())
-            tasks.create_task(run_sources(preview))
+            detail_updates = None if first_match else tasks.create_task(publish_details())
+            tasks.create_task(run_sources(preview, detail_updates))
     except* _Confirmed as confirmed:
         signal = confirmed
         while isinstance(signal, BaseExceptionGroup):
@@ -677,6 +698,7 @@ class CatalogPosterModel(QAbstractListModel):
 
 class BTResources(QObject):
     changed = Signal()
+    facetsChanged = Signal()
     catalogChanged = Signal()
     catalogResultsChanged = Signal()
     _catalogProgress = Signal(int, object)
@@ -705,7 +727,9 @@ class BTResources(QObject):
         self._generation = 0
         self._active = False
         self._loading = False
-        self._rows = []
+        self._resource_list = ResourceListModel(self)
+        self._filtered_resources = ResourceFilterModel(self._resource_list, self)
+        self._facets = {"total": 0, "categories": {}, "episode": [], "resolution": [], "fansub": []}
         self._sources = []
         self._error = ""
         self._schedule = True
@@ -819,9 +843,24 @@ class BTResources(QObject):
     def subject(self):
         return self._subject
 
-    @Property("QVariantList", notify=changed)
-    def rows(self):
-        return self._rows
+    @Property(QObject, constant=True)
+    def resourceModel(self):
+        return self._filtered_resources
+
+    @Property("QVariantMap", notify=facetsChanged)
+    def facets(self):
+        return self._facets
+
+    def _update_rows(self, rows):
+        if self._resource_list.rows == rows:
+            return
+        self._resource_list.update_rows(rows)
+        facets = {"total": len(rows), "categories": dict(Counter(row["category"] for row in rows))}
+        for key in ("episode", "resolution", "fansub"):
+            facets[key] = sorted({row[key] for row in rows})
+        if self._facets != facets:
+            self._facets = facets
+            self.facetsChanged.emit()
 
     @Property("QVariantList", notify=changed)
     def sources(self):
@@ -853,7 +892,7 @@ class BTResources(QObject):
         self._actions.cancelCopy()
         self._active = True
         self._loading = True
-        self._rows = [] if refresh else self._catalog_proofs.get(self._subject["id"], [])
+        self._update_rows([] if refresh else self._catalog_proofs.get(self._subject["id"], []))
         names = [source.name for source in SOURCE_TYPES] + list(self._extra_timeouts)
         self._sources = [{"name": name, "status": "搜索中", "error": "",
                           "count": 0, "keywords": ""} for name in names]
@@ -884,9 +923,13 @@ class BTResources(QObject):
     def _receive_progress(self, generation, update):
         if generation != self._generation:
             return
-        self._rows, statuses, self._schedule = update
-        self._sources = [statuses.get(source["name"], source) for source in self._sources]
-        self.changed.emit()
+        rows, statuses, schedule = update
+        self._update_rows(rows)
+        sources = [statuses.get(source["name"], source) for source in self._sources]
+        if self._sources != sources or self._schedule != schedule:
+            self._sources = sources
+            self._schedule = schedule
+            self.changed.emit()
 
     @Slot(int, str)
     def _receive_finished(self, generation, error):
