@@ -739,8 +739,11 @@ Window {
                                     const count = window.resourceSearch.catalogResults.length
                                     if (count || window.resourceSearch.catalogChecking)
                                         return ""
-                                    return window.resourceSearch.catalogCancelled ? "已取消搜索"
-                                        : "未找到有确认 BT 资源的动画"
+                                    if (window.resourceSearch.catalogCancelled)
+                                        return "已取消搜索"
+                                    if (window.resourceSearch.catalogIncomplete)
+                                        return "部分来源未能完成搜索，暂未确认 BT 资源"
+                                    return "未找到有确认 BT 资源的动画"
                                 case "empty": return "未找到匹配的动画，试试日文原名或更短的关键词。"
                                 case "cancelled": return "已取消搜索"
                                 case "error": return window.catalog.error
