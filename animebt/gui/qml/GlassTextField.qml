@@ -127,6 +127,5 @@ T.TextField {
         dimBackdrop: control.inModalPanel
         tint: control.hovered ? control.colors.controlHover : control.colors.controlBase
         focused: control.activeFocus
-        shine: control.activeFocus || control.hovered ? 0.8 : 0
     }
 }

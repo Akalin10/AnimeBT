@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 import re
 import unicodedata
+from opencc import OpenCC
 
 from animebt.core.matching import _normalize
 from animebt.core.results import publication_date
@@ -14,9 +15,11 @@ EXPLICIT_TOTAL = re.compile(r"总\s*第?\s*(\d{1,4})(?:\s*[-~～]\s*(\d{1,4}))?(
 SEASON_EPISODE = re.compile(r"\bs\d+e(\d{1,4})(?:\s*[-~]\s*e?(\d{1,4}))?", re.IGNORECASE)
 EPISODE_LABEL = re.compile(r"(\d{1,4})(?:\s*[-~～]\s*(\d{1,4}))?\Z")
 COMPLETE_COUNT = re.compile(r"全\s*(\d{1,3})\s*[集话話]")
-BARE_RANGE = re.compile(r"(?<!\w)(0?1)\s*[-~～]\s*(\d{1,3})(?=\s|[\])}]|$)")
+BARE_RANGE = re.compile(r"(?<!\w)(0?1)\s*[-~～]\s*(\d{1,3})(?=\s|[\])}]|全集|$)")
+LONG_EPISODE = re.compile(r"(?:第\s*(\d{1,4})(?:\s*[-~]\s*(\d{1,4}))?\s*[集话]|"
+                          r"\s[-–—]\s+(1\d{3})(?=\s*[\[(]|\s*$))")
 RELEASE_TAIL = re.compile(
-    r"^(?:$|[-–—~]\s*\d|(?:第\s*)?\d{1,3}(?![a-z\d])"
+    r"^(?:$|[-–—~]\s*\d|第\s*\d{1,4}(?:\s*[-~]\s*\d{1,4})?\s*[集话]|(?:第\s*)?\d{1,3}(?![a-z\d])"
     r"|(?:e|ep)\s*\d|总\s*第?\s*\d|全\s*\d"
     r"|web[- ]?(?:rip|dl)|bd(?:rip|mv)?\b|blu[- ]?ray|tv\b|\d{3,4}[pi]\b|[248]k\b"
     r"|(?:hevc|avc|x26[45]|h\.?26[45]|av1|aac|flac|mkv|mp4|chs|cht)\b"
@@ -32,6 +35,7 @@ FIRST_PART = re.compile(r"前半|上半|前编|第\s*[一1]\s*(?:部分|クー�
 SECOND_PART = re.compile(r"后半|下半|后编|第\s*[二2]\s*(?:部分|クール)|\b(?:part|cour)\s*2\b")
 CHINESE_DIGITS = dict(zip("零一二三四五六七八九", range(10)))
 CHINESE_DIGITS["〇"] = 0
+_to_traditional = OpenCC("s2t")
 
 
 def season_numbers(title):
@@ -93,6 +97,36 @@ def supplementary_names(subject, episodes):
     return list(dict.fromkeys(query for query in queries if len(query.replace(" ", "")) >= 4))
 
 
+def shared_series_names(subject, related):
+    """Find native-script stems shared by two verified series entries."""
+    stems = set()
+    for title in (subject["title"], subject["original"]):
+        for entry in related:
+            for other in (entry["title"], entry["original"]):
+                title_words, other_words = title.split(), other.split()
+                shared = []
+                for left, right in zip(title_words, other_words):
+                    if _normalize(left) != _normalize(right):
+                        break
+                    shared.append(left)
+                if shared and len("".join(shared)) >= 4:
+                    stems.add(" ".join(shared))
+    return sorted(stems, key=lambda name: (not subject["title"].startswith(name), -len(name), name))
+
+
+def traditional_name(name):
+    return _to_traditional.convert(name) if not re.search(r"[ぁ-ヿ]", name) else name
+
+
+def recorded_ova_subtitle(subject):
+    """Read a shared Latin subtitle from the two canonical names of an OVA."""
+    title = subject["title"]
+    match = re.fullmatch(r"([^\x00-\x7f]+) ([A-Za-z]{3,}(?: [A-Za-z]{3,})+)", title)
+    if match and (subtitle := phrase_pattern(_normalize(match[2]))) and subtitle.search(_normalize(subject["original"])):
+        return match[1], match[2]
+    return "", ""
+
+
 def phrase_pattern(text):
     words = re.findall(r"[^\W_]+", text)
     if not words:
@@ -118,6 +152,8 @@ def episode_label(resource):
         return "总第" + "-".join(group for group in match.groups() if group)
     if match := COMPLETE_COUNT.search(title):
         return f"01-{match[1]}"
+    if match := LONG_EPISODE.search(title):
+        return "-".join(group for group in match.groups() if group)
     if match := BARE_RANGE.search(title):
         return f"{match[1]}-{match[2]}"
     return "未知"
@@ -135,6 +171,15 @@ class SubjectMatcher:
     def __init__(self, subject, siblings, episodes):
         canonical = [name for name in (subject["title"], subject["original"]) if name]
         self.seasons = season_numbers(" / ".join(canonical))
+        recorded_aliases = subject.get("aliases", [])
+        inferred = season_numbers(" / ".join(recorded_aliases))
+        if not self.seasons and len(inferred) == 1:
+            self.seasons = inferred
+        self.numbered_aliases = [
+            pattern for alias in recorded_aliases
+            if season_numbers(alias) == self.seasons and self.seasons
+            and (pattern := phrase_pattern(name_parts(alias)[0]))
+        ]
         self.editions = set(EDITIONS.findall(_normalize(" ".join(canonical))))
         self.years = set(EDITION_YEAR.findall(_normalize(" ".join(canonical))))
         bases, parts = zip(*(name_parts(name) for name in canonical))
@@ -178,9 +223,14 @@ class SubjectMatcher:
         ]
         count = subject.get("episodes", 0)
         self.episode_count = count if type(count) is int and count > 1 else 0
+        self.schedule_pending = False
         self.premiere_year = subject.get("date", "")[:4]
         self.by_local = {}
         self.by_total = {}
+        self.season_offset = earlier_counts[0] if self.parts and len(earlier_counts) == 1 else None
+        self.add_episode_dates(episodes)
+
+    def add_episode_dates(self, episodes):
         for row in episodes:
             total, local = row.get("sort"), row.get("ep")
             aired = row.get("airdate")
@@ -192,8 +242,8 @@ class SubjectMatcher:
                 self.by_total[total] = aired
             if isinstance(local, (int, float)):
                 self.by_local[local] = aired
-        self.by_season = ({number + earlier_counts[0]: aired for number, aired in self.by_local.items()}
-                          if self.parts and len(earlier_counts) == 1 else {})
+        self.by_season = ({number + self.season_offset: aired for number, aired in self.by_local.items()}
+                          if self.season_offset is not None else {})
 
     def matches(self, resource):
         title = _normalize(resource.title)
@@ -212,7 +262,8 @@ class SubjectMatcher:
             return False
         if split and not self.parts and any(split.intersection(split_parts(part)) for part in self.other_parts):
             return False
-        if not any(self._name_in_title(pattern, title) for pattern in self.aliases):
+        numbered_name = bool(marked and self._numbered_name_in_title(title))
+        if not numbered_name and not any(self._name_in_title(pattern, title) for pattern in self.aliases):
             return False
 
         explicit_part = any(part in title for part in self.parts) or bool(split and split == self.split_parts)
@@ -226,8 +277,13 @@ class SubjectMatcher:
         has_split_evidence = self.parts or self.shared_season or split
         if marked and not has_split_evidence and (not self.years or years == self.years):
             if self.by_local:
-                return all(number in self.by_local for number in local)
-            return not self.episode_count or all(1 <= number <= self.episode_count for number in local)
+                return all(number in self.by_local for number in local) or (
+                    numbered_name and bool(local) and not any(number in self.by_local for number in local)
+                    and all(number in self.by_total for number in local)
+                )
+            if self.episode_count:
+                return all(1 <= number <= self.episode_count for number in local)
+            return not local or not self.schedule_pending
         # Split seasons and unnumbered releases need an episode/date check.
         # An unmarked number above the local range may be cumulative.
         if local and not marked and self.by_local and local.start > max(self.by_local):
@@ -255,6 +311,16 @@ class SubjectMatcher:
             tail = title[match.end():]
             if release_tail(tail):
                 return True
+        return False
+
+    def _numbered_name_in_title(self, title):
+        for pattern in self.numbered_aliases:
+            for match in pattern.finditer(title):
+                tail = title[match.end():].lstrip(" \t[({「『-")
+                if season := SEASON_MARKER.match(tail):
+                    suffix = tail[season.end():]
+                    if release_tail(suffix) or re.match(r"^\s*[\])}]*\s*/", suffix):
+                        return True
         return False
 
     @staticmethod

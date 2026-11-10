@@ -6,9 +6,11 @@ Item {
     required property GlassTheme colors
     required property GlassThemeManager optics
     required property QtObject catalog
-    required property var subjects
+    required property QtObject subjects
     required property real viewportY
     required property real viewportHeight
+    required property bool loading
+    required property bool animateLoading
     property bool viewportMoving: false
     property int preferredWidth: 200
     property int motion: 160
@@ -17,6 +19,7 @@ Item {
     signal posterActivated(int subjectId, Item coverItem, url cover)
     readonly property var selected: catalog.selected
     readonly property int gap: 12
+    readonly property int subjectCount: subjects.count
     readonly property int columnCount: columnsFor(preferredWidth)
     readonly property real cardWidth: widthFor(preferredWidth)
     readonly property real extraSpace: Math.max(0, width - cardWidth * columnCount - gap * (columnCount - 1)) / (columnCount + 1)
@@ -26,9 +29,32 @@ Item {
     readonly property int infoHeight: 2 * captionInset + 2 * Math.ceil(titleMetrics.implicitHeight)
         + Math.ceil(Math.max(captionMetrics.implicitHeight, originalMetrics.implicitHeight))
         + Math.ceil(captionMetrics.implicitHeight) + 15
-    readonly property real rowPitch: cardWidth * 1.5 + infoHeight + gap
-    readonly property int rowCount: Math.ceil(subjects.length / columnCount)
+    readonly property real cardHeight: cardWidth * 1.5 + infoHeight
+    readonly property real rowPitch: cardHeight + gap
+    readonly property bool trailing: loading && subjectCount > 0
+    readonly property int rowCount: Math.ceil((subjectCount + (trailing ? 1 : 0)) / columnCount)
     height: rowCount > 0 ? rowCount * rowPitch - gap : 0
+
+    component LoadingGlyph: Glyph {
+        id: loadingGlyph
+        path: "M 10 2 A 8 8 0 1 1 2 10"
+        ink: section.colors.accentText
+        scale: 1.25
+        NumberAnimation on rotation {
+            running: loadingGlyph.visible && section.animateLoading
+            from: 0
+            to: 360
+            duration: 900
+            loops: Animation.Infinite
+        }
+    }
+
+    LoadingGlyph {
+        objectName: "catalogInitialLoader"
+        visible: section.loading && section.subjectCount === 0
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.max(0, (section.viewportHeight + Math.min(0, section.viewportY) - height) / 2)
+    }
 
     // Measure shaped lines so the CJK fallback contributes its actual height.
     Text {
@@ -74,9 +100,10 @@ Item {
 
             ItemDelegate {
                 id: card
-                required property var modelData
+                required property var subject
                 required property int index
-                property real arrival: section.motion > 0 ? 0 : 1
+                readonly property var modelData: subject
+                property real arrival: section.motion > 0 ? 0.55 : 1
                 property int coverIndex: 0
                 readonly property var alternatives: modelData.coverAlternatives || []
                 readonly property bool inViewport: y + height > section.viewportY - 16
@@ -89,22 +116,19 @@ Item {
                 readonly property bool chosen: populated && section.selected.id === modelData.id
                 objectName: populated ? "subjectCard" : "posterSlot"
                 width: section.cardWidth
-                height: width * 1.5 + section.infoHeight
+                height: section.cardHeight
                 padding: 0
                 enabled: populated
                 hoverEnabled: populated
                 highlighted: chosen
                 opacity: arrival
-                scale: (0.97 + 0.03 * arrival) * (down ? 0.985 : hovered ? 1.018 : 1)
-                transform: [
-                    Scale {
-                        origin.x: card.width / 2
-                        origin.y: card.height / 2
-                        xScale: section.reflowScale
-                        yScale: section.reflowScale
-                    },
-                    Translate { y: 12 * (1 - card.arrival) }
-                ]
+                transformOrigin: Item.Top
+                scale: down ? 0.985 : hovered ? 1.018 : 1
+                transform: Scale {
+                    origin.x: card.width / 2
+                    xScale: section.reflowScale
+                    yScale: section.reflowScale
+                }
                 z: hovered ? 1 : 0
                 Behavior on scale {
                     NumberAnimation { duration: section.motion; easing.type: Easing.OutCubic }
@@ -124,16 +148,13 @@ Item {
                         }
                     }
                 }
-                SequentialAnimation {
+                NumberAnimation {
                     id: enterMotion
-                    PauseAnimation { duration: Math.min(card.index, 12) * 20 }
-                    NumberAnimation {
-                        target: card
-                        property: "arrival"
-                        to: 1
-                        duration: section.motion + 70
-                        easing.type: Easing.OutCubic
-                    }
+                    target: card
+                    property: "arrival"
+                    to: 1
+                    duration: section.motion
+                    easing.type: Easing.OutCubic
                 }
                 onClicked: section.posterActivated(modelData.id, poster, String(cover.source) ? cover.source : modelData.cover)
                 Accessible.ignored: !populated
@@ -160,7 +181,6 @@ Item {
                     radius: 16
                     outline: card.chosen || card.visualFocus ? colors.accent : section.optics.edge
                     tint: card.hovered ? colors.controlHover : colors.controlBase
-                    shine: card.hovered ? 0.65 : 0
                 }
                 contentItem: Item {
                     Rectangle {
@@ -283,6 +303,15 @@ Item {
                         }
                     }
                 }
+            }
+        }
+        Item {
+            objectName: "catalogTrailingSlot"
+            visible: section.trailing
+            width: section.cardWidth
+            height: section.cardHeight
+            LoadingGlyph {
+                anchors.centerIn: parent
             }
         }
     }

@@ -38,7 +38,6 @@ ComboBox {
         tint: control.down ? control.colors.controlPressed
              : control.hovered ? control.colors.controlHover : control.colors.controlBase
         focused: control.visualFocus || control.popup.visible
-        shine: control.hovered ? 0.8 : 0
     }
     delegate: GlassMenuItem {
         required property var model

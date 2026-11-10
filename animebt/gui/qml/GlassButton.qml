@@ -32,6 +32,5 @@ Button {
         tint: control.down ? control.colors.controlPressed
              : control.hovered ? control.colors.controlHover : control.colors.controlBase
         focused: control.visualFocus
-        shine: control.down ? 1.35 : control.hovered ? 0.8 : 0
     }
 }

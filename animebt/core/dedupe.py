@@ -43,6 +43,7 @@ def deduplicate(items: list[Resource]) -> list[Resource]:
 
 def merge(target, item):
     target.sources = list(dict.fromkeys(target.sources + item.sources))
+    target.origins = [list(origin) for origin in dict.fromkeys(map(tuple, target.origins + item.origins))]
     for name in ("magnet", "torrent_url", "info_hash", "publish_time"):
         if not getattr(target, name):
             setattr(target, name, getattr(item, name))

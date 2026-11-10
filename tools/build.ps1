@@ -11,6 +11,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Build failed" }
     $app = Join-Path (Get-Location) 'dist\AnimeBT'
     Copy-Item -LiteralPath README.md,CHANGELOG.md,packaging\THIRD_PARTY.md -Destination $app
+    $docs = Join-Path $app 'docs'
+    $packageDocs = Join-Path $app 'packaging'
+    New-Item -ItemType Directory -Path $docs,$packageDocs -Force | Out-Null
+    Copy-Item -LiteralPath docs\search-audit.md,docs\screenshot.png -Destination $docs
+    Copy-Item -LiteralPath docs\showcase -Destination $docs -Recurse
+    Copy-Item -LiteralPath packaging\THIRD_PARTY.md -Destination $packageDocs
     & $buildPython tools/collect_notices.py $app
     if ($LASTEXITCODE -ne 0) { throw "License notice collection failed" }
     $releaseVersion = (& $buildPython -c 'from animebt.version import __version__; print(__version__)').Trim()
