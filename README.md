@@ -1,12 +1,18 @@
-# AnimeBT
 
-<p align="center">
-  <img src="animebt/gui/assets/icon.png" width="72" alt="AnimeBT 拉姆图标">
-</p>
+<div align="center">
+  <img src="animebt/gui/assets/icon.png" width="90" alt="AnimeBT Logo">
 
-<p align="center">
-  <a href="https://github.com/Akalin10/AnimeBT/releases/download/v1.1.0/AnimeBT-1.1.0-Windows-x64.zip">下载 Windows x64 版</a> · <a href="https://github.com/Akalin10/AnimeBT/releases">Releases</a> · <a href="docs/guide.md">使用指南</a>
-</p>
+  <h1>AnimeBT</h1>
+
+  <p>
+    <a href="https://github.com/Akalin10/AnimeBT/releases/download/v1.1.0/AnimeBT-1.1.0-Windows-x64.zip">下载 Windows x64 版</a>
+    ·
+    <a href="https://github.com/Akalin10/AnimeBT/releases">Releases</a>
+    ·
+    <a href="docs/guide.md">使用指南</a>
+  </p>
+</div>
+
 
 ## 功能
 
