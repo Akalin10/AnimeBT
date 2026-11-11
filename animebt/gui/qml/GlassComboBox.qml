@@ -17,7 +17,7 @@ ComboBox {
         text: control.displayText
         textFormat: Text.PlainText
         color: control.enabled ? control.colors.ink : control.colors.muted
-        font.pixelSize: 13
+        font.pixelSize: control.colors.textSize
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }
@@ -34,7 +34,7 @@ ComboBox {
         objectName: "comboGlass"
         optics: control.optics
         radius: 10
-        implicitHeight: 34
+        implicitHeight: 38
         tint: control.down ? control.colors.controlPressed
              : control.hovered ? control.colors.controlHover : control.colors.controlBase
         focused: control.visualFocus || control.popup.visible
@@ -65,7 +65,7 @@ ComboBox {
             const top = control.mapToItem(overlay, 0, 0).y
             const above = top - 13
             const below = overlay.height - top - control.height - 13
-            const preferred = Math.min(278, control.count * 34 + topPadding + bottomPadding)
+            const preferred = Math.min(278, control.count * 38 + topPadding + bottomPadding)
             opensAbove = below < preferred && above > below
             space = Math.max(50, opensAbove ? above : below)
         }

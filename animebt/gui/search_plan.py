@@ -21,11 +21,12 @@ def _language(name):
     return "latin"
 
 
-def _variants(name):
+def _variants(name, *, minimum_cjk=4):
     parts = re.split(r"\s*[/／|｜]\s*|(?<=[\u3400-\u9fffぁ-ヿ])\s+(?=[a-zA-Z])"
                      r"|(?<=[a-zA-Z])\s+(?=[\u3400-\u9fffぁ-ヿ])", name)
     for part in parts:
-        if part != name and len(re.sub(r"[\W_]", "", part)) >= 4:
+        minimum = minimum_cjk if _language(part) in {"cjk", "jp"} else 4
+        if part != name and len(re.sub(r"[\W_]", "", part)) >= minimum:
             yield part.strip(" -:()[]")
 
 

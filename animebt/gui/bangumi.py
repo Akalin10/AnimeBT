@@ -223,6 +223,19 @@ class BangumiSearch(QObject):
             self._status = "cancelled"
             self.changed.emit()
 
+    @Slot()
+    def reset(self):
+        self._abort_pending()
+        self._results = []
+        self._primary = []
+        self._alternates = []
+        self._selected = {}
+        self._keyword = ""
+        self._total = self._primary_total = 0
+        self._status, self._error = "idle", ""
+        self.selectionChanged.emit()
+        self.changed.emit()
+
     def _abort_pending(self):
         pending, self._pending = self._pending, set()
         for reply in pending:

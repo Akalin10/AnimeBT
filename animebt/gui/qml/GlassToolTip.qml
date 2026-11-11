@@ -12,7 +12,7 @@ ToolTip {
         textFormat: Text.PlainText
         color: tip.colors.ink
         wrapMode: Text.Wrap
-        font.pixelSize: 13
+        font.pixelSize: tip.colors.detailTextSize
     }
     background: GlassPopupFrame {
         colors: tip.colors

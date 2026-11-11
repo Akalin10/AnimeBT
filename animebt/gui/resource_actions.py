@@ -112,6 +112,7 @@ class TorrentJob(QRunnable):
 class ResourceActions(QObject):
     changed = Signal()
     feedback = Signal(str, bool)
+    magnetCopied = Signal(str)
     _finished = Signal(int, str, str)
 
     def __init__(self, parent=None):
@@ -138,9 +139,9 @@ class ResourceActions(QObject):
         magnet = row.get("magnet")
         expected = row.get("info_hash")
         if valid_magnet(magnet, expected):
-            self._copy(magnet, "✓ 磁链已复制", "复制磁链失败")
+            self._copy_magnet(row, magnet)
         elif cached := self._resolved.get((row.get("torrent_url"), expected)):
-            self._copy(cached, "✓ 磁链已复制", "复制磁链失败")
+            self._copy_magnet(row, cached)
         elif row.get("torrent_url"):
             self._start(row)
         else:
@@ -178,8 +179,14 @@ class ResourceActions(QObject):
         clipboard.setText(text)
         if clipboard.text() == text:
             self.feedback.emit(success, True)
+            return True
         else:
             self.feedback.emit(failure + "：无法写入 Windows 剪贴板，请重试", False)
+            return False
+
+    def _copy_magnet(self, row, magnet):
+        if self._copy(magnet, "✓ 磁链已复制", "复制磁链失败"):
+            self.magnetCopied.emit(row.get("key", ""))
 
     @Slot(int, str, str)
     def _receive(self, generation, value, error):
@@ -194,7 +201,7 @@ class ResourceActions(QObject):
             self.feedback.emit("✓ 种子已保存 · " + Path(value).name, True)
         elif value:
             self._resolved[(job.row["torrent_url"], job.row.get("info_hash"))] = value
-            self._copy(value, "✓ 磁链已复制", "复制磁链失败")
+            self._copy_magnet(job.row, value)
 
     def cancelCopy(self):
         if self._job is not None and self._job.target is None:

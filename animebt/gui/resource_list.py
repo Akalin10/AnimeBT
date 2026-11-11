@@ -68,7 +68,30 @@ class ResourceFilterModel(QSortFilterProxyModel):
     def __init__(self, source, parent):
         super().__init__(parent)
         self._filters = ()
+        self._sort_field = None
+        self._descending = False
         self.setSourceModel(source)
+
+    @Slot(str)
+    def setSortOrder(self, order):
+        fields = {"time": "sort_time", "size": "sort_size", "name": "title"}
+        field, _, direction = order.rpartition("_")
+        if field not in fields or direction not in {"asc", "desc"}:
+            return
+        self._sort_field = fields[field]
+        self._descending = direction == "desc"
+        self.invalidate()
+        self.sort(0, Qt.SortOrder.DescendingOrder if self._descending else Qt.SortOrder.AscendingOrder)
+
+    def lessThan(self, left, right):
+        first = self.sourceModel().rows[left.row()].get(self._sort_field)
+        second = self.sourceModel().rows[right.row()].get(self._sort_field)
+        if first is None or second is None:
+            return (first is None and second is not None) if self._descending else (
+                first is not None and second is None)
+        if isinstance(first, str):
+            first, second = first.casefold(), second.casefold()
+        return first < second
 
     @Slot(str, str, str, str)
     def setFilters(self, category, episode, resolution, fansub):

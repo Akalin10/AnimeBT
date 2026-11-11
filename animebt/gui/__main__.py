@@ -17,7 +17,7 @@ def system_animations_enabled():
 
 def main():
     try:
-        from PySide6.QtCore import QStandardPaths, QUrl
+        from PySide6.QtCore import QStandardPaths, Qt, QUrl
         from PySide6.QtGui import QGuiApplication, QIcon
         from PySide6.QtQml import QQmlApplicationEngine
         from PySide6.QtQuickControls2 import QQuickStyle
@@ -35,6 +35,7 @@ def main():
     from .title_assistant import TitleAssistant
     from .typography import apply_system_typography
 
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QGuiApplication(sys.argv)
     app.setApplicationName("AnimeBT")
     app.setApplicationDisplayName("AnimeBT")

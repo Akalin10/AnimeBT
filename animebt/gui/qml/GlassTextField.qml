@@ -1,15 +1,20 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Templates as T
+import QtQml.Models
 
 T.TextField {
     id: control
     required property GlassTheme colors
     required property GlassThemeManager optics
     property bool inModalPanel: false
+    property list<Action> extraActions
+    property bool showExtraActions: false
     implicitHeight: Math.max(implicitBackgroundHeight, contentHeight + topPadding + bottomPadding)
     hoverEnabled: true
     selectByMouse: true
-    padding: 6
+    font.pixelSize: colors.textSize
+    padding: 8
     leftPadding: 11
     rightPadding: 11
     verticalAlignment: TextInput.AlignVCenter
@@ -115,6 +120,33 @@ T.TextField {
             text: "全选"
             enabled: control.length > 0
             onTriggered: control.selectAll()
+        }
+        MenuSeparator {
+            visible: control.showExtraActions && control.extraActions.length > 0
+            height: visible ? implicitHeight : 0
+            topPadding: 6
+            bottomPadding: 6
+            leftPadding: 6
+            rightPadding: 6
+            contentItem: Rectangle {
+                implicitHeight: 1
+                color: control.colors.softLine
+            }
+        }
+        Instantiator {
+            model: control.extraActions
+            delegate: GlassMenuItem {
+                required property var modelData
+                action: modelData
+                visible: control.showExtraActions
+                height: visible ? implicitHeight : 0
+                colors: control.colors
+                optics: control.optics
+                backdropTier: editingMenu.backdropTier
+                dimBackdrop: editingMenu.dimBackdrop
+            }
+            onObjectAdded: (index, object) => editingMenu.addItem(object)
+            onObjectRemoved: (index, object) => editingMenu.removeItem(object)
         }
     }
 

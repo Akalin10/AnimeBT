@@ -19,7 +19,7 @@ MenuItem {
         text: entry.text
         textFormat: Text.PlainText
         color: !entry.enabled ? entry.colors.muted : entry.selected ? entry.colors.accentText : entry.colors.ink
-        font.pixelSize: 13
+        font.pixelSize: entry.colors.textSize
         font.weight: entry.selected ? Font.DemiBold : Font.Normal
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
@@ -31,7 +31,7 @@ MenuItem {
         dimBackdrop: entry.dimBackdrop
         compact: true
         readingPlate: true
-        implicitHeight: 34
+        implicitHeight: 38
         radius: 9
         tint: !entry.enabled ? entry.colors.controlBase
              : entry.down ? entry.colors.controlPressed

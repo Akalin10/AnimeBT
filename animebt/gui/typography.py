@@ -4,6 +4,7 @@ import re
 
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtGui import QFont, QFontDatabase, QRawFont
+from PySide6.QtQuick import QQuickWindow
 
 
 LATIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -87,6 +88,7 @@ def _matched_pair(chinese, japanese):
 
 
 def apply_system_typography(app):
+    QQuickWindow.setTextRenderType(QQuickWindow.TextRenderType.QtTextRendering)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
     font.setWeight(QFont.Weight.Normal)
     font.setPixelSize(14)

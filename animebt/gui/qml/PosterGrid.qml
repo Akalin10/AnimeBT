@@ -23,8 +23,8 @@ Item {
     readonly property int columnCount: columnsFor(preferredWidth)
     readonly property real cardWidth: widthFor(preferredWidth)
     readonly property real extraSpace: Math.max(0, width - cardWidth * columnCount - gap * (columnCount - 1)) / (columnCount + 1)
-    readonly property int titleSize: Math.round(Math.max(15, Math.min(19, 11 + cardWidth / 28)))
-    readonly property int captionSize: cardWidth < 170 ? 12 : 13
+    readonly property int titleSize: Math.round(Math.max(16, Math.min(20, 12 + cardWidth / 28)))
+    readonly property int captionSize: cardWidth < 170 ? 13 : 14
     readonly property int captionInset: cardWidth < 145 ? 8 : 12
     readonly property int infoHeight: 2 * captionInset + 2 * Math.ceil(titleMetrics.implicitHeight)
         + Math.ceil(Math.max(captionMetrics.implicitHeight, originalMetrics.implicitHeight))
@@ -35,18 +35,10 @@ Item {
     readonly property int rowCount: Math.ceil((subjectCount + (trailing ? 1 : 0)) / columnCount)
     height: rowCount > 0 ? rowCount * rowPitch - gap : 0
 
-    component LoadingGlyph: Glyph {
-        id: loadingGlyph
-        path: "M 10 2 A 8 8 0 1 1 2 10"
-        ink: section.colors.accentText
-        scale: 1.25
-        NumberAnimation on rotation {
-            running: loadingGlyph.visible && section.animateLoading
-            from: 0
-            to: 360
-            duration: 900
-            loops: Animation.Infinite
-        }
+    component LoadingGlyph: SearchLoadingBox {
+        colors: section.colors
+        optics: section.optics
+        animate: section.animateLoading
     }
 
     LoadingGlyph {

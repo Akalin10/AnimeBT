@@ -3,7 +3,6 @@
 import asyncio
 from collections import Counter, deque
 from dataclasses import replace
-from hashlib import sha256
 import re
 from threading import Event, Lock
 
@@ -12,7 +11,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Property, Q
 
 from animebt.config import Settings
 from animebt.core.dedupe import deduplicate
-from animebt.core.results import display_date, filter_sort, publication_date
+from animebt.core.results import publication_date
 from animebt.core.runtime import logger, record_error
 from animebt.core.search import SearchService
 from animebt.sources import SOURCE_TYPES
@@ -28,7 +27,8 @@ from .series_resources import (
     SeriesMatcher, bundled_seasons, cumulative_range, load_series, merge_attributions, work_kind,
 )
 from .search_plan import plan_queries
-from .title_spans import parse_display_title
+from .resource_rows import resource_rows
+from .keyword_search import collect_keyword_resources
 
 
 SOURCE_BUDGET_SECONDS = 28
@@ -87,62 +87,6 @@ async def subject_episodes(client, subject_id, cache=None):
     rows = first + [row for page in pages if page is not None for row in page[0]]
     if cache is not None and all(page is not None for page in pages):
         cache[subject_id] = rows
-    return rows
-
-
-def resource_rows(resources, matcher=None):
-    by_hash = {}
-    if matcher:
-        for resource in resources:
-            attribution = matcher.classify(resource)
-            if resource.info_hash:
-                by_hash.setdefault(resource.info_hash, []).append((resource, attribution))
-    rows = []
-    for resource in filter_sort(deduplicate(resources)):
-        if matcher and resource.info_hash:
-            mirrors = by_hash[resource.info_hash]
-            attribution = merge_attributions(evidence for _, evidence in mirrors)
-            if attribution.category(matcher.subject["id"]):
-                # Keep merged links and sources, but show a title that actually proved the match.
-                proof = next(item for item, evidence in mirrors if evidence == attribution)
-                resource = replace(resource, title=proof.title)
-        else:
-            attribution = matcher.classify(resource) if matcher else None
-        category = attribution.category(matcher.subject["id"]) if attribution else "独立资源"
-        if not category:
-            continue
-        work_ids = sorted(attribution.work_ids) if attribution else []
-        names = ()
-        if matcher:
-            relevant = {*work_ids, matcher.subject["id"], matcher.root["id"]}
-            names = tuple(sorted({
-                name for entry_id in relevant for work in (matcher.works[entry_id],)
-                for name in (work["title"], work["original"], *work.get("aliases", []))
-                if len(name) >= (2 if name in (work["title"], work["original"]) else 4)
-            }))
-        spans, ambiguous = parse_display_title(resource.title, names)
-        rows.append({
-            "key": resource.info_hash or sha256(
-                repr((resource.title, resource.torrent_url, resource.magnet, resource.size,
-                      resource.source, resource.source_id, resource.publish_time)).encode("utf-8")
-            ).hexdigest(),
-            "title": resource.title,
-            "titleSpans": [span.as_dict() for span in spans],
-            "titleAmbiguous": ambiguous,
-            "episode": episode_label(resource),
-            "resolution": resource.metadata.resolution or "未知",
-            "fansub": resource.metadata.fansub or "未知",
-            "size": resource.display_size,
-            "date": display_date(resource.publish_time),
-            "sources": " / ".join(resource.sources),
-            "provenance": resource.origins,
-            "magnet": resource.magnet or "",
-            "torrent_url": resource.torrent_url or "",
-            "info_hash": resource.info_hash or "",
-            "category": category,
-            "work_ids": work_ids,
-            "works": [matcher.works[entry_id]["title"] for entry_id in work_ids],
-        })
     return rows
 
 
@@ -610,7 +554,7 @@ class CatalogJob(QRunnable):
 
 class SearchJob(QRunnable):
     def __init__(self, directory, subject, siblings, refresh, episode_cache, series_cache, generation, progress, finished,
-                 extra_timeouts):
+                 extra_timeouts, keyword=None):
         super().__init__()
         self.directory = directory
         self.subject = subject
@@ -622,6 +566,7 @@ class SearchJob(QRunnable):
         self.progress = progress
         self.finished = finished
         self.extra_timeouts = extra_timeouts
+        self.keyword = keyword
         self.cancelled = Event()
 
     async def search(self):
@@ -630,11 +575,12 @@ class SearchJob(QRunnable):
         service = SearchService(settings, self.directory, source_types=[*SOURCE_TYPES, *EXTRA_SOURCE_TYPES],
                                 source_timeouts=self.extra_timeouts)
         try:
-            task = asyncio.create_task(collect_resources(
-                service, self.subject, self.siblings,
-                lambda *values: self.progress.emit(self.generation, values), self.refresh,
-                self.episode_cache, self.series_cache,
-            ))
+            update = lambda *values: self.progress.emit(self.generation, values)
+            search = (collect_keyword_resources(service, self.keyword, update, self.refresh)
+                      if self.keyword is not None else collect_resources(
+                          service, self.subject, self.siblings, update, self.refresh,
+                          self.episode_cache, self.series_cache))
+            task = asyncio.create_task(search)
             while not task.done() and not self.cancelled.is_set():
                 await asyncio.wait({task}, timeout=0.1)
             if self.cancelled.is_set():
@@ -727,6 +673,9 @@ class BTResources(QObject):
         self._generation = 0
         self._active = False
         self._loading = False
+        self._list_mode = False
+        self._keyword = ""
+        self._cancelled = False
         self._resource_list = ResourceListModel(self)
         self._filtered_resources = ResourceFilterModel(self._resource_list, self)
         self._facets = {"total": 0, "categories": {}, "episode": [], "resolution": [], "fansub": []}
@@ -791,6 +740,8 @@ class BTResources(QObject):
 
     @Slot("QVariantList", bool)
     def extendCatalog(self, subjects, complete):
+        if self._list_mode:
+            return
         added = []
         for subject in subjects:
             if subject["id"] not in self._catalog_by_id:
@@ -839,6 +790,30 @@ class BTResources(QObject):
     def loading(self):
         return self._loading
 
+    @Property(bool, notify=changed)
+    def listMode(self):
+        return self._list_mode
+
+    @Property(str, notify=changed)
+    def keyword(self):
+        return self._keyword
+
+    @Property(str, notify=changed)
+    def emptyMessage(self):
+        if self._cancelled:
+            return "已取消搜索"
+        if self._error:
+            return self._error
+        errors = [state for state in self._sources if state.get("error")]
+        limited = any(state.get("limited") for state in self._sources)
+        if errors:
+            return ("部分来源搜索超时，暂未找到匹配资源"
+                    if any(state["status"] == "超时" for state in errors)
+                    else "部分来源访问失败，暂未找到匹配资源")
+        if limited:
+            return "已查范围内未找到匹配资源，部分来源检索范围受限"
+        return "未找到匹配的 BT 资源" if self._list_mode else "未找到该作品的 BT 资源"
+
     @Property("QVariantMap", notify=changed)
     def subject(self):
         return self._subject
@@ -876,11 +851,47 @@ class BTResources(QObject):
 
     @Slot("QVariantMap", "QVariantList")
     def openSubject(self, subject, siblings):
-        if not subject.get("id"):
+        if self._list_mode or not subject.get("id"):
             return
         self._subject = subject
         self._siblings = siblings
         self._start()
+
+    @Slot(bool)
+    def setListMode(self, enabled):
+        if self._list_mode == enabled:
+            return
+        self.closePage()
+        self.verifyCatalog([])
+        self._list_mode = enabled
+        self._keyword = ""
+        self._subject = {}
+        self._siblings = []
+        self._sources = []
+        self._error = ""
+        self._cancelled = False
+        self._update_rows([])
+        self._filtered_resources.setFilters("", "", "", "")
+        self.changed.emit()
+
+    @Slot(str)
+    def searchKeyword(self, keyword):
+        keyword = keyword.strip()
+        if not self._list_mode or not keyword or (self._loading and keyword == self._keyword):
+            return
+        self._keyword = keyword
+        self._subject = {}
+        self._start()
+
+    @Slot()
+    def cancelSearch(self):
+        if self._loading:
+            self._cancel_job()
+            self._loading = False
+            self._cancelled = True
+            self._sources = [dict(source, status="已取消") if source["status"] == "搜索中" else source
+                             for source in self._sources]
+            self.changed.emit()
 
     @Slot()
     def refresh(self):
@@ -892,7 +903,8 @@ class BTResources(QObject):
         self._actions.cancelCopy()
         self._active = True
         self._loading = True
-        self._update_rows([] if refresh else self._catalog_proofs.get(self._subject["id"], []))
+        self._cancelled = False
+        self._update_rows([] if self._list_mode or refresh else self._catalog_proofs.get(self._subject["id"], []))
         names = [source.name for source in SOURCE_TYPES] + list(self._extra_timeouts)
         self._sources = [{"name": name, "status": "搜索中", "error": "",
                           "count": 0, "keywords": ""} for name in names]
@@ -900,7 +912,7 @@ class BTResources(QObject):
         self._schedule = True
         self._job = SearchJob(self._directory, self._subject, self._siblings, refresh,
                               self._episode_cache, self._series_cache, self._generation, self._progress, self._finished,
-                              self._extra_timeouts)
+                              self._extra_timeouts, self._keyword if self._list_mode else None)
         self.changed.emit()
         self._pool.start(self._job)
 
