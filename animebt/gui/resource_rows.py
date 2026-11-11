@@ -6,8 +6,8 @@ from hashlib import sha256
 from animebt.core.dedupe import deduplicate
 from animebt.core.results import display_date, filter_sort, publication_date
 
-from .resource_match import episode_label
-from .series_resources import merge_attributions
+from .resource_match import EPISODE_LABEL, episode_label, numbers
+from .series_resources import bundled_seasons, merge_attributions
 from .title_spans import parse_display_title
 
 
@@ -29,7 +29,7 @@ def resource_rows(resources, matcher=None):
                 resource = replace(resource, title=proof.title)
         else:
             attribution = matcher.classify(resource) if matcher else None
-        category = attribution.category(matcher.subject["id"]) if attribution else "搜索资源"
+        category = attribution.category(matcher.subject["id"]) if attribution else "独立资源"
         if not category:
             continue
         work_ids = sorted(attribution.work_ids) if attribution else []
@@ -42,6 +42,10 @@ def resource_rows(resources, matcher=None):
                 if len(name) >= (2 if name in (work["title"], work["original"]) else 4)
             }))
         spans, ambiguous = parse_display_title(resource.title, names)
+        if not matcher and (any(span.kind == "collection" for span in spans)
+                            or len(numbers(EPISODE_LABEL.fullmatch(episode_label(resource)))) > 1
+                            or bundled_seasons(resource.title)):
+            category = "合集资源"
         published = publication_date(resource.publish_time)
         rows.append({
             "key": resource.info_hash or sha256(

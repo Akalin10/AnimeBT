@@ -30,7 +30,7 @@ RadioButton {
     contentItem: Text {
         text: control.text
         color: control.colors.ink
-        font.pixelSize: 13
+        font.pixelSize: control.colors.textSize
         verticalAlignment: Text.AlignVCenter
     }
     background: GlassSurface {

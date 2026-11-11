@@ -553,7 +553,7 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "AnimeBT"
                     color: window.ink
-                    font.pixelSize: 17
+                    font.pixelSize: 19
                     font.weight: Font.Bold
                 }
             }
@@ -650,12 +650,35 @@ Window {
                         NumberAnimation { duration: window.navigationDuration; easing.type: Easing.InOutCubic }
                     }
                     height: 60
-                    font.pixelSize: width < 540 ? 16 : 18
+                    font.pixelSize: width < 540 ? 18 : 20
                     color: window.ink
                     leftPadding: 52
                     rightPadding: clearButton.visible ? 144 : 100
                     Accessible.name: window.listMode ? "资源关键词" : "动画名称"
                     onAccepted: window.submitSearch()
+                    showExtraActions: window.listMode
+                    extraActions: [
+                        Action {
+                            objectName: "searchSourceDetails"
+                            text: "来源详情"
+                            enabled: window.listMode && window.resourceSearch.active
+                                && window.resourceSearch.sources.length > 0 && resourceLoader.item !== null
+                            checkable: true
+                            checked: resourceLoader.item ? resourceLoader.item.showSources : false
+                            onTriggered: {
+                                if (resourceLoader.item)
+                                    resourceLoader.item.showSources = checked
+                            }
+                        },
+                        Action {
+                            objectName: "searchDeepSearch"
+                            text: "深入搜索"
+                            enabled: window.listMode && window.resourceSearch.active && !window.resourceSearch.loading
+                                && window.resourceSearch.keyword.length > 0
+                                && window.resourceSearch.keyword === searchField.text.trim()
+                            onTriggered: window.resourceSearch.refresh()
+                        }
+                    ]
 
                     background: GlassSurface {
                         objectName: "searchGlass"
@@ -711,7 +734,7 @@ Window {
                             color: searchButton.enabled ? themeColors.accentText : window.muted
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
-                            font.pixelSize: 14
+                            font.pixelSize: themeColors.textSize
                             font.weight: Font.DemiBold
                         }
                         background: GlassSurface {
@@ -772,7 +795,7 @@ Window {
                 visible: !window.listMode && window.hasSearched && text.length > 0 && !window.resourceSearch.active
                 textFormat: Text.PlainText
                 color: window.muted
-                font.pixelSize: 13
+                font.pixelSize: themeColors.detailTextSize
                 wrapMode: Text.Wrap
             }
         }
@@ -839,6 +862,7 @@ Window {
             sourceComponent: ResourcePage {
                 backend: window.resourceSearch
                 motion: window.motion
+                loadingMotionAllowed: window.startupMotionAllowed
                 colors: themeColors
                 assistant: window.titleAssistant
                 optics: glassOptics
@@ -894,7 +918,7 @@ Window {
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 color: actionToast.success ? themeColors.accentText : themeColors.danger
-                font.pixelSize: 13
+                font.pixelSize: themeColors.detailTextSize
                 font.weight: Font.DemiBold
             }
             Timer { id: toastTimer; interval: actionToast.success ? 2000 : 4800 }
@@ -916,161 +940,171 @@ Window {
             x: surface.width - width - 22
             y: titleBar.y + titleBar.height + 6
             width: 324
+            height: Math.min(implicitHeight, surface.height - y - 12)
             padding: 18
             focus: true
             closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-            contentItem: Column {
-                spacing: 8
-                Text {
-                    text: "设置"
-                    color: window.ink
-                    font.pixelSize: 22
-                    font.weight: Font.Bold
-                }
-                Text {
-                    text: "搜索模式"
-                    color: window.muted
-                    font.pixelSize: 13
-                }
-                ButtonGroup { id: searchModes }
-                Row {
-                    spacing: 6
-                    GlassRadioButton {
-                        objectName: "posterModeOption"
-                        colors: themeColors
-                        optics: glassOptics
-                        text: "海报模式"
-                        checked: !window.listMode
-                        ButtonGroup.group: searchModes
-                        onClicked: window.changeSearchMode("poster")
-                    }
-                    GlassRadioButton {
-                        objectName: "listModeOption"
-                        colors: themeColors
-                        optics: glassOptics
-                        text: "列表模式"
-                        checked: window.listMode
-                        ButtonGroup.group: searchModes
-                        onClicked: window.changeSearchMode("list")
-                    }
-                }
-                Switch {
-                    objectName: "darkModeSwitch"
-                    text: "深色模式"
-                    checked: appearance.darkMode
-                    onToggled: {
-                        appearance.darkMode = checked
-                        appearance.setValue("darkMode", checked)
-                        appearance.sync()
-                    }
-                }
-                Switch {
-                    objectName: "motionSwitch"
-                    text: "界面动画"
-                    checked: window.animate
-                    onToggled: {
-                        appearance.animations = checked
-                        appearance.setValue("animations", checked)
-                        appearance.sync()
-                    }
-                }
-                Switch {
-                    objectName: "startupAnimationSwitch"
-                    text: "启动动画"
-                    checked: appearance.startupAnimation
-                    onToggled: {
-                        appearance.startupAnimation = checked
-                        appearance.setValue("startupAnimation", checked)
-                        appearance.sync()
-                    }
-                }
-                RowLayout {
-                    width: parent.width
-                    spacing: 12
+            contentItem: ScrollView {
+                id: settingsScroll
+                implicitHeight: settingsContent.implicitHeight
+                contentWidth: availableWidth
+                clip: true
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                Column {
+                    id: settingsContent
+                    width: settingsScroll.availableWidth
+                    spacing: 8
                     Text {
-                        Layout.fillWidth: true
-                        text: "海报尺寸"
+                        text: "设置"
                         color: window.ink
-                        font.pixelSize: 13
+                        font.pixelSize: 24
+                        font.weight: Font.Bold
                     }
-                    Slider {
-                        id: posterSize
-                        objectName: "posterSizeSlider"
-                        Layout.preferredWidth: 184
-                        Layout.preferredHeight: 38
-                        from: 0
-                        to: window.posterWidths.length - 1
-                        stepSize: 1
-                        snapMode: Slider.SnapAlways
-                        value: window.posterStep
-                        leftPadding: 10
-                        rightPadding: 68
-                        Accessible.name: "海报尺寸"
-                        Accessible.description: window.posterWidths[Math.round(value)] + " 像素"
-                        onMoved: window.changePosterStep(Math.round(value))
-                        background: GlassSurface {
-                            optics: glassOptics
-                            radius: 13
-                            focused: posterSize.visualFocus
-                            Rectangle {
-                                x: posterSize.leftPadding + 7
-                                y: (parent.height - height) / 2
-                                width: posterSize.availableWidth - 14
-                                height: 2
-                                radius: 1
-                                color: themeColors.line
-                                Repeater {
-                                    model: window.posterWidths.length
-                                    Rectangle {
-                                        required property int index
-                                        x: index * parent.width / (window.posterWidths.length - 1) - width / 2
-                                        y: (parent.height - height) / 2
-                                        width: 5
-                                        height: 5
-                                        radius: 2.5
-                                        color: themeColors.accent
-                                    }
-                                }
-                            }
-                            Text {
-                                anchors.right: parent.right
-                                anchors.rightMargin: 11
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: window.posterWidths[Math.round(posterSize.value)] + " px"
-                                color: themeColors.ink
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                            }
-                        }
-                        handle: Rectangle {
-                            x: posterSize.leftPadding + posterSize.visualPosition * (posterSize.availableWidth - width)
-                            y: (posterSize.height - height) / 2
-                            width: 14
-                            height: 14
-                            radius: 7
-                            color: posterSize.pressed ? themeColors.accentPressed : themeColors.accentFill
-                            border.color: themeColors.frame
-                            Behavior on x { NumberAnimation { duration: posterSize.pressed ? 0 : window.motion; easing.type: Easing.OutCubic } }
-                        }
-                        GlassToolTip {
+                    Text {
+                        text: "搜索模式"
+                        color: window.muted
+                        font.pixelSize: themeColors.detailTextSize
+                    }
+                    ButtonGroup { id: searchModes }
+                    Row {
+                        spacing: 6
+                        GlassRadioButton {
+                            objectName: "posterModeOption"
                             colors: themeColors
                             optics: glassOptics
-                            text: "海报尺寸 · " + window.posterWidths.join(" / ") + " px"
-                            visible: posterSize.hovered && !posterSize.pressed
-                            delay: 650
+                            text: "海报模式"
+                            checked: !window.listMode
+                            ButtonGroup.group: searchModes
+                            onClicked: window.changeSearchMode("poster")
+                        }
+                        GlassRadioButton {
+                            objectName: "listModeOption"
+                            colors: themeColors
+                            optics: glassOptics
+                            text: "列表模式"
+                            checked: window.listMode
+                            ButtonGroup.group: searchModes
+                            onClicked: window.changeSearchMode("list")
                         }
                     }
-                }
-                GlassButton {
-                    objectName: "titleAssistantSettings"
-                    colors: themeColors
-                    optics: glassOptics
-                    backdropTier: GlassSurface.Scene
-                    text: "AI 智能整理…"
-                    onClicked: {
-                        settingsPopup.close()
-                        assistantSettings.open()
+                    Switch {
+                        objectName: "darkModeSwitch"
+                        text: "深色模式"
+                        checked: appearance.darkMode
+                        onToggled: {
+                            appearance.darkMode = checked
+                            appearance.setValue("darkMode", checked)
+                            appearance.sync()
+                        }
+                    }
+                    Switch {
+                        objectName: "motionSwitch"
+                        text: "界面动画"
+                        checked: window.animate
+                        onToggled: {
+                            appearance.animations = checked
+                            appearance.setValue("animations", checked)
+                            appearance.sync()
+                        }
+                    }
+                    Switch {
+                        objectName: "startupAnimationSwitch"
+                        text: "启动动画"
+                        checked: appearance.startupAnimation
+                        onToggled: {
+                            appearance.startupAnimation = checked
+                            appearance.setValue("startupAnimation", checked)
+                            appearance.sync()
+                        }
+                    }
+                    RowLayout {
+                        width: parent.width
+                        spacing: 12
+                        Text {
+                            Layout.fillWidth: true
+                            text: "海报尺寸"
+                            color: window.ink
+                            font.pixelSize: themeColors.detailTextSize
+                        }
+                        Slider {
+                            id: posterSize
+                            objectName: "posterSizeSlider"
+                            Layout.preferredWidth: 184
+                            Layout.preferredHeight: 38
+                            from: 0
+                            to: window.posterWidths.length - 1
+                            stepSize: 1
+                            snapMode: Slider.SnapAlways
+                            value: window.posterStep
+                            leftPadding: 10
+                            rightPadding: 68
+                            Accessible.name: "海报尺寸"
+                            Accessible.description: window.posterWidths[Math.round(value)] + " 像素"
+                            onMoved: window.changePosterStep(Math.round(value))
+                            background: GlassSurface {
+                                optics: glassOptics
+                                radius: 13
+                                focused: posterSize.visualFocus
+                                Rectangle {
+                                    x: posterSize.leftPadding + 7
+                                    y: (parent.height - height) / 2
+                                    width: posterSize.availableWidth - 14
+                                    height: 2
+                                    radius: 1
+                                    color: themeColors.line
+                                    Repeater {
+                                        model: window.posterWidths.length
+                                        Rectangle {
+                                            required property int index
+                                            x: index * parent.width / (window.posterWidths.length - 1) - width / 2
+                                            y: (parent.height - height) / 2
+                                            width: 5
+                                            height: 5
+                                            radius: 2.5
+                                            color: themeColors.accent
+                                        }
+                                    }
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 11
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: window.posterWidths[Math.round(posterSize.value)] + " px"
+                                    color: themeColors.ink
+                                    font.pixelSize: themeColors.detailTextSize
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                            handle: Rectangle {
+                                x: posterSize.leftPadding + posterSize.visualPosition * (posterSize.availableWidth - width)
+                                y: (posterSize.height - height) / 2
+                                width: 14
+                                height: 14
+                                radius: 7
+                                color: posterSize.pressed ? themeColors.accentPressed : themeColors.accentFill
+                                border.color: themeColors.frame
+                                Behavior on x { NumberAnimation { duration: posterSize.pressed ? 0 : window.motion; easing.type: Easing.OutCubic } }
+                            }
+                            GlassToolTip {
+                                colors: themeColors
+                                optics: glassOptics
+                                text: "海报尺寸 · " + window.posterWidths.join(" / ") + " px"
+                                visible: posterSize.hovered && !posterSize.pressed
+                                delay: 650
+                            }
+                        }
+                    }
+                    GlassButton {
+                        objectName: "titleAssistantSettings"
+                        colors: themeColors
+                        optics: glassOptics
+                        backdropTier: GlassSurface.Scene
+                        text: "AI 智能整理…"
+                        onClicked: {
+                            settingsPopup.close()
+                            assistantSettings.open()
+                        }
                     }
                 }
             }

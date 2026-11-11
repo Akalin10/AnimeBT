@@ -247,6 +247,25 @@ class KeywordPipelineTest(unittest.IsolatedAsyncioTestCase):
 
 
 class KeywordModelTest(unittest.TestCase):
+    def test_keyword_categories_use_local_pack_markers_and_episode_ranges(self):
+        from animebt.gui.resource_rows import resource_rows
+        titles = ("AKIRA [01][1080p]", "Series [01-12][1080p]", "Series 全集 [1080p]",
+                  "Series Batch [1080p]", "Series S1-S2 [1080p]", "Series OVA [1080p]")
+        rows = resource_rows([Resource(title, info_hash=f"{index:040x}") for index, title in enumerate(titles, 1)])
+        categories = {row["title"]: row["category"] for row in rows}
+        self.assertEqual(categories[titles[0]], "独立资源")
+        self.assertEqual(categories[titles[-1]], "独立资源")
+        for title in titles[1:-1]:
+            self.assertEqual(categories[title], "合集资源")
+        self.assertTrue(all(row["work_ids"] == [] for row in rows))
+        model = ResourceListModel(None)
+        proxy = ResourceFilterModel(model, model)
+        model.update_rows(rows)
+        proxy.setFilters("合集资源", "", "1080p", "")
+        self.assertEqual(proxy.rowCount(), 4)
+        proxy.setFilters("独立资源", "", "", "")
+        self.assertEqual(proxy.rowCount(), 2)
+
     def test_incremental_sort_and_filter_preserve_distinct_hashes(self):
         model = ResourceListModel(None)
         proxy = ResourceFilterModel(model, model)
@@ -324,7 +343,7 @@ class KeywordWindowTest(unittest.TestCase):
                     self.assertEqual(len(resources.sources), 11)
                     generation = resources._generation
                     resources._receive_progress(generation, ([{
-                        "key": "a" * 40, "title": SAMPLE, "category": "搜索资源", "episode": "1",
+                        "key": "a" * 40, "title": SAMPLE, "category": "独立资源", "episode": "1",
                         "resolution": "1080p", "fansub": "test", "works": [],
                         "size": "1 GB", "date": "", "sources": "Anime Garden",
                         "magnet": "magnet:?xt=urn:btih:" + "a" * 40, "info_hash": "a" * 40,
@@ -334,11 +353,29 @@ class KeywordWindowTest(unittest.TestCase):
                     self.assertIsNotNone(page)
                     self.assertEqual(str(page.property("coverSource").toString()), "")
                     self.assertEqual(page.findChild(QObject, "resourceList").property("count"), 1)
+                    self.assertTrue(page.findChild(QObject, "分类Filter").property("visible"))
+                    page.setProperty("categoryFilter", "合集资源")
+                    self.assertEqual(resources.resourceModel.rowCount(), 0)
+                    page.setProperty("categoryFilter", "独立资源")
+                    self.assertEqual(resources.resourceModel.rowCount(), 1)
+                    page.setProperty("categoryFilter", "")
                     self.assertEqual(len(network.replies), 1)
                     resources.actions.copyMagnet(resources._resource_list.rows[0])
                     self.assertEqual(self.app.clipboard().text(), "magnet:?xt=urn:btih:" + "a" * 40)
+                    self.assertEqual(page.property("copiedKey"), "a" * 40)
                     resources.actions.copyTitle(resources._resource_list.rows[0])
                     self.assertEqual(self.app.clipboard().text(), SAMPLE)
+                    page.setProperty("copiedKey", "")
+                    from unittest.mock import Mock
+                    denied_clipboard = Mock()
+                    denied_clipboard.text.return_value = ""
+                    failures = []
+                    resources.actions.feedback.connect(lambda message, success: failures.append(success))
+                    with patch("animebt.gui.resource_actions.QGuiApplication.clipboard",
+                               return_value=denied_clipboard):
+                        resources.actions.copyMagnet(resources._resource_list.rows[0])
+                    self.assertFalse(failures[-1])
+                    self.assertEqual(page.property("copiedKey"), "")
                     window.changeSearchMode(QJSValue("poster"))
                     self.assertTrue(job.cancelled.is_set())
                     self.assertEqual(resources.facets["total"], 0)

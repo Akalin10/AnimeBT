@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "animebt"
-version = "1.1.0"
+version = "1.1.1"
 description = "Local anime torrent search GUI and TUI"
 requires-python = ">=3.11"
 dependencies = ["httpx>=0.28,<1", "opencc-python-reimplemented==0.1.7", "textual>=8,<9"]

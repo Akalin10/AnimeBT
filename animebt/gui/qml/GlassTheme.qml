@@ -3,6 +3,9 @@ import QtQuick
 QtObject {
     property bool dark: false
     property QtObject typography: null
+    readonly property int textSize: 15
+    readonly property int smallTextSize: 13
+    readonly property int detailTextSize: 14
 
     function originalFont(title, pixels) {
         return typography ? typography.originalFont(title, pixels) : Qt.font({pixelSize: pixels})
@@ -18,6 +21,8 @@ QtObject {
     readonly property color accentInk: dark ? "#391426" : "#ffffff"
     readonly property color danger: dark ? "#ffbdcd" : "#832d46"
     readonly property color warning: dark ? "#f2c7aa" : "#7a4b3c"
+    readonly property color success: dark ? "#8de3b5" : "#187548"
+    readonly property color successFill: dark ? "#1c4134" : "#e5f5ec"
 
     readonly property color backgroundTop: dark ? "#f1222a40" : "#edf6f8ff"
     readonly property color backgroundMiddle: dark ? "#eb171f35" : "#e5e7edf9"

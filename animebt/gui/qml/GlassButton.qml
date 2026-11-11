@@ -17,14 +17,14 @@ Button {
         text: control.text
         textFormat: Text.PlainText
         color: control.enabled ? control.colors.accentText : control.colors.muted
-        font.pixelSize: 13
+        font.pixelSize: control.colors.textSize
         font.weight: Font.DemiBold
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
     }
     background: GlassSurface {
         optics: control.optics
-        implicitHeight: 34
+        implicitHeight: 38
         radius: 11
         backdropTier: control.backdropTier
         readingPlate: control.backdropTier !== GlassSurface.Ambient

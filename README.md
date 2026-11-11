@@ -5,7 +5,7 @@
   <h1>AnimeBT</h1>
 
   <p>
-    <a href="https://github.com/Akalin10/AnimeBT/releases/download/v1.1.0/AnimeBT-1.1.0-Windows-x64.zip">下载 Windows x64 版</a>
+    <a href="https://github.com/Akalin10/AnimeBT/releases/download/v1.1.1/AnimeBT-1.1.1-Windows-x64.zip">下载 Windows x64 版</a>
     ·
     <a href="https://github.com/Akalin10/AnimeBT/releases">Releases</a>
     ·
