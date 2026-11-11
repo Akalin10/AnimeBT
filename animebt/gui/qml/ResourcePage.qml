@@ -11,7 +11,7 @@ Item {
     required property QtObject assistant
     required property GlassThemeManager optics
     property url coverOverride: ""
-    readonly property url coverSource: String(coverOverride) ? coverOverride : backend.subject.cover || ""
+    readonly property url coverSource: backend.listMode ? "" : String(coverOverride) ? coverOverride : backend.subject.cover || ""
     property bool hidePoster: false
     readonly property alias posterAnchor: detailPoster
     signal backRequested()
@@ -23,10 +23,23 @@ Item {
     readonly property int completedSources: backend.sources.filter(source => source.status !== "搜索中").length
     readonly property bool compactHeader: height < 470
     onSubjectIdChanged: showSources = false
+    readonly property string queryToken: backend.listMode ? backend.keyword : String(subjectId)
+    onQueryTokenChanged: {
+        episodeFilter = ""
+        resolutionFilter = ""
+        fansubFilter = ""
+        categoryFilter = ""
+        menuRow = null
+        if (resourceMenu)
+            resourceMenu.close()
+        if (list)
+            list.positionViewAtBeginning()
+    }
     property string episodeFilter: ""
     property string resolutionFilter: ""
     property string fansubFilter: ""
     property string categoryFilter: ""
+    property string sortOrder: "time_desc"
     property var menuRow: null
     readonly property QtObject actions: backend.actions
     readonly property bool actionPopupOpen: resourceMenu.opened || saveDialog.visible
@@ -51,7 +64,11 @@ Item {
     onEpisodeFilterChanged: changeFilter()
     onResolutionFilterChanged: changeFilter()
     onFansubFilterChanged: changeFilter()
-    Component.onCompleted: applyFilters()
+    onSortOrderChanged: backend.resourceModel.setSortOrder(sortOrder)
+    Component.onCompleted: {
+        applyFilters()
+        backend.resourceModel.setSortOrder(sortOrder)
+    }
     onMotionChanged: if (motion === 0) {
         filterMotion.stop()
         filterOffset = 0
@@ -218,6 +235,7 @@ Item {
                             Layout.fillWidth: true
                             GlassButton {
                                 objectName: "backToCatalog"
+                                visible: !page.backend.listMode
                                 colors: page.colors
                                 optics: page.optics
                                 text: "返回"
@@ -227,13 +245,14 @@ Item {
                             GlassButton {
                                 colors: page.colors
                                 optics: page.optics
-                                text: "重新搜索"
+                                text: page.backend.listMode ? "深入搜索" : "重新搜索"
                                 enabled: !page.backend.loading
                                 onClicked: page.backend.refresh()
                             }
                         }
                         Text {
                             Layout.fillWidth: true
+                            visible: !page.backend.listMode
                             text: page.backend.subject.title || ""
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
@@ -282,11 +301,11 @@ Item {
                                 Layout.fillWidth: true
                                 text: page.backend.error || (page.backend.loading
                                     ? "正在搜索 · 已完成 " + page.completedSources + "/" + page.backend.sources.length
-                                      + " 个来源 · 已确认 " + page.facets.total + " 条"
+                                      + " 个来源 · " + (page.backend.listMode ? "已找到 " : "已确认 ") + page.facets.total + " 条"
                                     : page.facets.total
-                                      ? "已确认 " + page.facets.total + " 条"
+                                      ? (page.backend.listMode ? "已找到 " : "已确认 ") + page.facets.total + " 条"
                                         + " · 当前显示 " + list.count + " 条"
-                                      : "未找到该作品的 BT 资源")
+                                      : page.backend.emptyMessage)
                                 textFormat: Text.PlainText
                                 elide: Text.ElideRight
                                 color: page.backend.error ? colors.danger : colors.accentText
@@ -395,6 +414,7 @@ Item {
                 Layout.fillWidth: true
                 ResourceFilter {
                     id: category
+                    visible: !page.backend.listMode
                     label: "分类"
                     choices: page.categoryOptions
                     selectedValue: page.categoryFilter
@@ -420,6 +440,21 @@ Item {
                     choices: page.options("fansub", page.fansubFilter)
                     selectedValue: page.fansubFilter
                     onPicked: value => page.fansubFilter = value
+                }
+                ResourceFilter {
+                    id: sorting
+                    visible: page.backend.listMode
+                    label: "排序"
+                    choices: [
+                        {label: "发布时间 · 从新到旧", value: "time_desc"},
+                        {label: "发布时间 · 从旧到新", value: "time_asc"},
+                        {label: "大小 · 从大到小", value: "size_desc"},
+                        {label: "大小 · 从小到大", value: "size_asc"},
+                        {label: "标题 · 升序", value: "name_asc"},
+                        {label: "标题 · 降序", value: "name_desc"}
+                    ]
+                    selectedValue: page.sortOrder
+                    onPicked: value => page.sortOrder = value
                 }
             }
         }

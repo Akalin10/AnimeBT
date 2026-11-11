@@ -35,9 +35,10 @@ Window {
     required property QtObject resourceSearch
     required property QtObject titleAssistant
     property bool showSearchHome: false
-    readonly property bool hasSearched: !showSearchHome && catalog.status !== "idle"
-    readonly property bool scrollCatalogHeader: hasSearched
-    readonly property bool catalogLoading: hasSearched && (catalog.status === "loading" || resourceSearch.catalogChecking)
+    readonly property bool listMode: appearance.searchMode === "list"
+    readonly property bool hasSearched: !showSearchHome && (listMode ? resourceSearch.keyword.length > 0 : catalog.status !== "idle")
+    readonly property bool scrollCatalogHeader: hasSearched && !listMode
+    readonly property bool catalogLoading: !listMode && hasSearched && (catalog.status === "loading" || resourceSearch.catalogChecking)
     readonly property var posterWidths: [120, 160, 200, 240]
     readonly property int posterStep: Math.max(0, Math.min(posterWidths.length - 1, appearance.posterSizeStep))
     property Item posterOrigin: null
@@ -57,10 +58,12 @@ Window {
         property bool animations: true
         property bool startupAnimation: true
         property int posterSizeStep: 2
+        property string searchMode: "poster"
     }
     Component.onCompleted: {
         posterGrid.preferredWidth = posterWidths[posterStep]
         startupActive = startupMotionAllowed && appearance.startupAnimation && appearance.animations
+        resourceSearch.setListMode(listMode)
     }
     GlassThemeManager {
         id: glassOptics
@@ -98,6 +101,13 @@ Window {
 
     function submitSearch() {
         const query = searchField.text.trim()
+        if (listMode) {
+            if (query) {
+                showSearchHome = false
+                resourceSearch.searchKeyword(query)
+            }
+            return
+        }
         if (!query || (catalog.keyword === query
                 && (catalog.status === "loading" || resourceSearch.catalogChecking)))
             return
@@ -125,8 +135,29 @@ Window {
     }
 
     function cancelSearch() {
+        if (listMode) {
+            resourceSearch.cancelSearch()
+            return
+        }
         catalog.cancel()
         resourceSearch.cancelCatalog()
+    }
+
+    function changeSearchMode(mode) {
+        if (appearance.searchMode === mode)
+            return
+        showSearchHome = true
+        cancelPosterFlight()
+        settlePosterReflow()
+        posterOrigin = null
+        flightSource = ""
+        resourceSearch.setListMode(mode === "list")
+        catalog.reset()
+        page.cancelFlick()
+        page.contentY = 0
+        appearance.searchMode = mode
+        appearance.setValue("searchMode", mode)
+        appearance.sync()
     }
 
     function applyPosterWidth() {
@@ -234,6 +265,11 @@ Window {
     }
 
     function returnToCatalog() {
+        if (listMode) {
+            showSearchHome = true
+            resourceSearch.closePage()
+            return
+        }
         ++navigationSerial
         const source = flightRunning ? Qt.rect(flyingPoster.x, flyingPoster.y, flyingPoster.width, flyingPoster.height)
                                      : posterRect(resourceLoader.item ? resourceLoader.item.posterAnchor : null)
@@ -263,7 +299,7 @@ Window {
     Connections {
         target: window.catalog
         function onChanged() {
-            if (!window.showSearchHome)
+            if (!window.listMode && !window.showSearchHome)
                 window.resourceSearch.extendCatalog(window.catalog.candidates, window.catalog.status !== "loading")
         }
         function onSelectionChanged() {
@@ -575,9 +611,9 @@ Window {
             Item {
                 id: searchArea
                 z: 3
-                enabled: !window.resourceSearch.active
+                enabled: window.listMode || !window.resourceSearch.active
                 visible: opacity > 0
-                opacity: window.resourceSearch.active ? 0 : 1
+                opacity: window.resourceSearch.active && !window.listMode ? 0 : 1
                 Behavior on opacity { NumberAnimation { duration: window.motion; easing.type: Easing.OutCubic } }
                 y: window.scrollCatalogHeader ? 0 : titleBar.y + titleBar.height
                 anchors.left: parent.left
@@ -618,7 +654,7 @@ Window {
                     color: window.ink
                     leftPadding: 52
                     rightPadding: clearButton.visible ? 144 : 100
-                    Accessible.name: "动画名称"
+                    Accessible.name: window.listMode ? "资源关键词" : "动画名称"
                     onAccepted: window.submitSearch()
 
                     background: GlassSurface {
@@ -650,9 +686,10 @@ Window {
                     Button {
                         id: searchButton
                         objectName: "searchButton"
-                        readonly property bool canCancel: (window.catalog.status === "loading"
-                            || window.resourceSearch.catalogChecking)
-                            && window.catalog.keyword === searchField.text.trim()
+                        readonly property bool canCancel: window.listMode
+                            ? window.resourceSearch.loading && window.resourceSearch.keyword === searchField.text.trim()
+                            : (window.catalog.status === "loading" || window.resourceSearch.catalogChecking)
+                              && window.catalog.keyword === searchField.text.trim()
                         text: canCancel ? "取消" : "搜索"
                         width: 80
                         height: 44
@@ -701,7 +738,7 @@ Window {
                 topLeftRadius: window.frameRadius
                 topRightRadius: window.frameRadius
                 color: glassOptics.readingColor(themeColors.controlBase)
-                opacity: window.hasSearched && !window.resourceSearch.active ? 1 : 0
+                opacity: window.hasSearched && (window.listMode || !window.resourceSearch.active) ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: window.motion } }
                 visible: opacity > 0
             }
@@ -732,7 +769,7 @@ Window {
                     default: return ""
                     }
                 }
-                visible: window.hasSearched && text.length > 0 && !window.resourceSearch.active
+                visible: !window.listMode && window.hasSearched && text.length > 0 && !window.resourceSearch.active
                 textFormat: Text.PlainText
                 color: window.muted
                 font.pixelSize: 13
@@ -743,7 +780,7 @@ Window {
         Flickable {
             id: page
             objectName: "catalogPage"
-            visible: window.hasSearched && (opacity > 0 || !window.resourceSearch.active)
+            visible: !window.listMode && window.hasSearched && (opacity > 0 || !window.resourceSearch.active)
             enabled: !window.resourceSearch.active
             opacity: window.resourceSearch.active ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: window.navigationDuration; easing.type: Easing.OutCubic } }
@@ -791,7 +828,7 @@ Window {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: 14
-            anchors.topMargin: titleBar.y + titleBar.height + 14
+            anchors.topMargin: window.listMode ? catalogTop.height + 6 : titleBar.y + titleBar.height + 14
             anchors.leftMargin: window.contentInset
             anchors.rightMargin: window.contentInset
             active: window.resourceSearch.active || window.flightRunning || opacity > 0
@@ -890,6 +927,33 @@ Window {
                     color: window.ink
                     font.pixelSize: 22
                     font.weight: Font.Bold
+                }
+                Text {
+                    text: "搜索模式"
+                    color: window.muted
+                    font.pixelSize: 13
+                }
+                ButtonGroup { id: searchModes }
+                Row {
+                    spacing: 6
+                    GlassRadioButton {
+                        objectName: "posterModeOption"
+                        colors: themeColors
+                        optics: glassOptics
+                        text: "海报模式"
+                        checked: !window.listMode
+                        ButtonGroup.group: searchModes
+                        onClicked: window.changeSearchMode("poster")
+                    }
+                    GlassRadioButton {
+                        objectName: "listModeOption"
+                        colors: themeColors
+                        optics: glassOptics
+                        text: "列表模式"
+                        checked: window.listMode
+                        ButtonGroup.group: searchModes
+                        onClicked: window.changeSearchMode("list")
+                    }
                 }
                 Switch {
                     objectName: "darkModeSwitch"
@@ -1070,7 +1134,7 @@ Window {
 
     Shortcut {
         sequence: "Ctrl+F"
-        enabled: !window.startupActive && !window.resourceSearch.active
+        enabled: !window.startupActive && (window.listMode || !window.resourceSearch.active)
         onActivated: {
             if (window.scrollCatalogHeader) {
                 page.cancelFlick()
@@ -1081,14 +1145,15 @@ Window {
     }
     Shortcut {
         sequence: "Esc"
-        enabled: !window.resourceSearch.active
-                 && (window.catalog.status === "loading" || window.resourceSearch.catalogChecking)
+        enabled: (window.listMode ? window.resourceSearch.loading
+                 : !window.resourceSearch.active && (window.catalog.status === "loading" || window.resourceSearch.catalogChecking))
                  && !settingsPopup.opened && !assistantSettings.opened && !searchField.editingMenuOpen
         onActivated: window.cancelSearch()
     }
     Shortcut {
         sequence: "Esc"
-        enabled: window.resourceSearch.active && !settingsPopup.opened && !assistantSettings.opened
+        enabled: window.resourceSearch.active && !(window.listMode && window.resourceSearch.loading)
+                 && !settingsPopup.opened && !assistantSettings.opened
                  && (!resourceLoader.item || !resourceLoader.item.actionPopupOpen)
         onActivated: window.returnToCatalog()
     }
