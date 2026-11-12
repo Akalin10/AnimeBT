@@ -56,16 +56,16 @@
 
 输入动画名称后按 Enter 或点击「搜索」。点击海报打开资源详情。左键点击资源缩略图可复制磁链，右键菜单可保存 Torrent 文件。
 
-### 终端界面
+~~### 终端界面~~
 
-在源码目录中使用 Python 3.11 或更新版本运行：
+~~在源码目录中使用 Python 3.11 或更新版本运行：~~
 
-```powershell
-python -m pip install .
-python -m animebt
-```
+~~```powershell~~
+~~python -m pip install .~~
+~~python -m animebt~~
+~~```~~
 
-在搜索框输入关键词。选中资源后，按 Ctrl+C 复制磁链，按 Ctrl+S 保存 Torrent 文件。完整快捷键见[使用指南](docs/guide.md)。
+~~在搜索框输入关键词。选中资源后，按 Ctrl+C 复制磁链，按 Ctrl+S 保存 Torrent 文件。完整快捷键见[使用指南](docs/guide.md)。~~
 
 ## 源码运行与构建
 
