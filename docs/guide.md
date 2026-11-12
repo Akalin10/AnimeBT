@@ -2,21 +2,21 @@
 
 [返回项目首页](../README.md)
 
-## TUI
+~~## TUI~~
 
-![AnimeBT TUI](screenshot.png)
+~~![AnimeBT TUI](screenshot.png)~~
 
-终端版使用原有八个 BT 来源。使用 Python 3.11 或更新版本，在源码目录运行：
+~~终端版使用原有八个 BT 来源。使用 Python 3.11 或更新版本，在源码目录运行：~~
 
-```powershell
-python -m pip install .
-python -m animebt
-```
+~~```powershell~~
+~~python -m pip install .~~
+~~python -m animebt~~
+~~```~~
 
-- 点击表头排序。
-- Ctrl+C 复制磁链；Ctrl+S 保存种子。
-- Ctrl+O 设置目录和主题；Ctrl+R 刷新；Ctrl+Q 退出。
-- 配置、缓存、日志自动创建于 `%LOCALAPPDATA%/AnimeBT`。
+~~- 点击表头排序。~~
+~~- Ctrl+C 复制磁链；Ctrl+S 保存种子。~~
+~~- Ctrl+O 设置目录和主题；Ctrl+R 刷新；Ctrl+Q 退出。~~
+~~- 配置、缓存、日志自动创建于 `%LOCALAPPDATA%/AnimeBT`。~~
 
 ## 从源码运行 Windows GUI
 
