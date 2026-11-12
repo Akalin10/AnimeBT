@@ -17,13 +17,13 @@
 ## 功能
 
 - **GUI**：支持海报模式和列表模式。海报模式通过 Bangumi 查找作品，展示已确认有资源的条目；列表模式直接按关键词检索 BT 来源。资源页保留原始标题，支持筛选、复制磁链和保存 Torrent。
-- **TUI**：在终端按关键词检索多个 BT 来源，在同一张表中浏览和排序结果。
+- ~~**TUI**：在终端按关键词检索多个 BT 来源，在同一张表中浏览和排序结果。~~
 - 两种界面均支持复制磁链和保存 Torrent 文件。GUI 还提供浅色与深色主题、四档海报尺寸，以及可关闭的启动动画。
 - GUI 可选用 OpenAI 兼容 API 辅助解析资源标题。解析结果经过本地校验，用于标题展示。
 
 ## 资源来源
 
-TUI 和 GUI 共用八个来源：Anime Garden、Mikan（蜜柑计划）、ACG.RIP、萌番组、DMHY（动漫花园）、ACGNX、KissSub（爱恋动漫）和 Comicat（漫猫动漫 BT）。
+~~TUI 和 GUI 共用八个来源：Anime Garden、Mikan（蜜柑计划）、ACG.RIP、萌番组、DMHY（动漫花园）、ACGNX、KissSub（爱恋动漫）和 Comicat（漫猫动漫 BT）。~~
 
 GUI 默认还启用 Nyaa、Tokyo Toshokan 和 MioBT，共 11 个来源。MioBT 适配器从近期订阅条目中筛选资源。各来源的检索范围和限制见[来源覆盖与测试](docs/search-audit.md)。
 
