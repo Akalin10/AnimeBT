@@ -21,6 +21,16 @@ class SystemTypography(QObject):
         self.japanese = japanese
 
     @Slot(str, int, result=QFont)
+    def readableFont(self, title, pixels):
+        font = QFont(self.normal)
+        font.setStyleName("")  # Do not pin the inherited Regular face when QML requests Bold.
+        installed = set(QFontDatabase.families())
+        preferred = ['Yu Gothic UI', 'Segoe UI', 'Microsoft YaHei UI'] if KANA.search(title) else ['Microsoft YaHei UI', 'Segoe UI', 'Yu Gothic UI']
+        font.setFamilies([name for name in preferred if name in installed] + font.families())
+        font.setPixelSize(pixels)
+        return font
+
+    @Slot(str, int, result=QFont)
     def originalFont(self, title, pixels):
         font = QFont(self.japanese if KANA.search(title) else self.normal)
         font.setPixelSize(pixels)

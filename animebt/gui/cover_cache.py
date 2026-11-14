@@ -12,7 +12,7 @@ from .bangumi import USER_AGENT
 class CoverNetworkManager(QNetworkAccessManager):
     def createRequest(self, operation, original_request, outgoing_data=None):
         request = QNetworkRequest(original_request)
-        if operation == self.Operation.GetOperation and request.url().host() == "lain.bgm.tv":
+        if operation == self.Operation.GetOperation and request.url().host() in {"lain.bgm.tv", "s4.anilist.co"}:
             request.setAttribute(QNetworkRequest.Attribute.CacheLoadControlAttribute,
                                  QNetworkRequest.CacheLoadControl.PreferCache)
             request.setRawHeader(b"User-Agent", USER_AGENT)

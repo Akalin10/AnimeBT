@@ -13,6 +13,8 @@ T.TextField {
     implicitHeight: Math.max(implicitBackgroundHeight, contentHeight + topPadding + bottomPadding)
     hoverEnabled: true
     selectByMouse: true
+    font.family: colors.readingFamily
+    font.weight: colors.wallpaperTextShadow ? Font.DemiBold : Font.Normal
     font.pixelSize: colors.textSize
     padding: 8
     leftPadding: 11

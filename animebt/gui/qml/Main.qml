@@ -746,7 +746,7 @@ Window {
                     text: "Search"
                     color: window.ink
                     font.pixelSize: surface.height < 580 ? 56 : 72
-                    font.weight: Font.DemiBold
+                    font.weight: Font.Bold
                     font.letterSpacing: -0.8
                 }
 

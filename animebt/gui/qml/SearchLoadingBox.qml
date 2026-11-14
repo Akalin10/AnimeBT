@@ -19,6 +19,7 @@ Item {
     }
     Glyph {
         id: spinner
+        objectName: "searchLoadingSpinner"
         anchors.centerIn: parent
         path: "M10 2 A8 8 0 1 1 2 10"
         ink: loading.colors.accentText

@@ -70,6 +70,8 @@ async def bangumi_json(client, path, cache, refresh):
 
 async def load_series(client, subject, catalog, cache, refresh=False):
     """Visit the selected entry and at most two main-story/predecessor links."""
+    if subject.get("provider") == "anilist":
+        return {subject["id"]: subject}, subject, {}
     selected_id = subject["id"]
     available = {entry["id"]: entry for entry in catalog if entry}
     known = {selected_id: subject}

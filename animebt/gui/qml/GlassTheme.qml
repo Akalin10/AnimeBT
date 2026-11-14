@@ -7,16 +7,19 @@ QtObject {
     readonly property color wallpaperShadowColor: dark ? "#70000000" : "#75ffffff"
     readonly property bool plainDark: dark && !liquidGlass
     property QtObject typography: null
-    readonly property int textSize: 15
-    readonly property int smallTextSize: 13
-    readonly property int detailTextSize: 14
+    readonly property int textSize: wallpaperTextShadow ? 17 : 15
+    readonly property int smallTextSize: wallpaperTextShadow ? 14 : 13
+    readonly property int detailTextSize: wallpaperTextShadow ? 15 : 14
+
+    readonly property string readingFamily: wallpaperTextShadow && typography ? typography.readableFont("", textSize).family : Qt.application.font.family
 
     function originalFont(title, pixels) {
+        if (wallpaperTextShadow && typography) return typography.readableFont(title, pixels)
         return typography ? typography.originalFont(title, pixels) : Qt.font({pixelSize: pixels})
     }
 
     readonly property color ink: plainDark ? "#f2f0f3" : (liquidGlass ? (dark ? "#f4f1f5" : "#202843") : (dark ? "#eef1ff" : "#202843"))
-    readonly property color muted: plainDark ? "#bbb8c0" : (liquidGlass ? (dark ? "#d2cad7" : "#535e77") : (dark ? "#b8c3df" : "#535e77"))
+    readonly property color muted: wallpaperTextShadow && dark ? "#f0edf3" : plainDark ? "#bbb8c0" : (liquidGlass ? (dark ? "#d2cad7" : "#535e77") : (dark ? "#b8c3df" : "#535e77"))
     readonly property color accent: plainDark ? "#e998bd" : (liquidGlass ? (dark ? "#eab0cf" : "#a42b64") : (dark ? "#ffacd2" : "#a42b64"))
     readonly property color accentText: plainDark ? "#f0b4d0" : (liquidGlass ? (dark ? "#f1c6dd" : "#8d2457") : (dark ? "#ffc5e0" : "#8d2457"))
     readonly property color accentFill: accent

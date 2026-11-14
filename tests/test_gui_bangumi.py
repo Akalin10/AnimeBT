@@ -45,7 +45,7 @@ class ControlledNetwork(QObject):
     def post(self, request, body):
         reply = PendingReply(self)
         self.replies.append(reply)
-        self.keywords.append(json.loads(body)["keyword"])
+        self.keywords.append(json.loads(body).get("keyword", json.loads(body).get("variables", {}).get("search")))
         self.offsets.append(request.url().query())
         return reply
 
@@ -193,6 +193,52 @@ class BangumiSearchTest(unittest.TestCase):
         reply.code = 503
         reply.finished.emit()
 
+        self.assertEqual(search.status, "loading")
+        network.replies[-1].code = 503
+        network.replies[-1].finished.emit()
         self.assertEqual(search.status, "error")
         self.assertIn("503", search.error)
         self.assertEqual(search.results, [])
+
+
+class AniListFallbackTest(unittest.TestCase):
+    @staticmethod
+    def page(ids, more=False):
+        return {"data":{"Page":{"pageInfo":{"hasNextPage":more},"media":[
+            {"id":id,"title":{"native":"進撃の巨人","romaji":"Shingeki no Kyojin","english":"Attack on Titan"},
+             "synonyms":["进击的巨人"],"format":"TV","episodes":25,"startDate":{"year":2013,"month":4,"day":7},
+             "coverImage":{"extraLarge":"https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/example.jpg"}}
+            for id in ids]}}}
+    def test_success_paging_cache_and_namespaced_selection(self):
+        network=ControlledNetwork();search=BangumiSearch(manager=network);search.search('巨人')
+        network.replies[-1].code=503;network.replies[-1].finished.emit()
+        self.assertEqual(search.status,'loading')
+        BangumiSearchTest.finish(network.replies[-1],self.page([1],True))
+        self.assertEqual(search.candidates[0]['id'],-1)
+        BangumiSearchTest.finish(network.replies[-1],self.page([1,2]))
+        self.assertEqual([r['id'] for r in search.results],[-1,-2])
+        search.select(-1);self.assertEqual(search.selected['provider'],'anilist')
+        count=len(network.replies);search.search('巨人');self.assertEqual(len(network.replies),count)
+    def test_cancel_and_old_fallback_cannot_write_new_search(self):
+        network=ControlledNetwork();search=BangumiSearch(manager=network);search.search('旧')
+        network.replies[-1].code=503;network.replies[-1].finished.emit();old=network.replies[-1]
+        search.cancel();self.assertTrue(old.aborted);self.assertEqual(search.status,'cancelled')
+        search.search('新');BangumiSearchTest.finish(old,self.page([4]))
+        self.assertEqual(search.candidates,[])
+    def test_graphql_error_is_not_empty_success(self):
+        network=ControlledNetwork();search=BangumiSearch(manager=network);search.search('动画')
+        network.replies[-1].code=503;network.replies[-1].finished.emit()
+        BangumiSearchTest.finish(network.replies[-1],{'errors':[{'message':'Rate limited'}]})
+        self.assertEqual(search.status,'error');self.assertEqual(search.results,[])
+
+class FallbackMetadataIsolationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_no_bangumi_requests_for_anilist_subject(self):
+        from animebt.gui.series_resources import load_series
+        from animebt.gui.bt_resources import subject_episodes
+        from animebt.gui.anilist import read_page
+        subject=read_page(AniListFallbackTest.page([1]))[0][0]
+        class ForbiddenClient:
+            async def get(self,*args,**kwargs):raise AssertionError('Unexpected Bangumi request')
+        works,root,_=await load_series(ForbiddenClient(),subject,[],{})
+        self.assertEqual(root['id'],-1);self.assertEqual(list(works),[-1])
+        self.assertEqual(await subject_episodes(ForbiddenClient(),-1,{}),[])

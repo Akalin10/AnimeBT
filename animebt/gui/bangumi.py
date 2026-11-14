@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 import json
+import logging
 import os
 import re
 from datetime import date
@@ -296,8 +297,9 @@ class BangumiSearch(QObject):
             except (ValueError, KeyError, TypeError, AttributeError):
                 error = "Bangumi 返回了无法读取的搜索结果，请稍后重试。"
         if error:
-            self._status, self._error = "error", error
-            self.changed.emit()
+            self._fallback_error = error
+            logging.getLogger(__name__).warning("Bangumi unavailable, trying AniList: %s", error)
+            self._post_anilist(1)
             return
 
         total = data.get("total")
@@ -313,6 +315,38 @@ class BangumiSearch(QObject):
             request = self._request(RELATIONS_URL.format(anchors[0]["id"]), 4000)
             self._track(self._network.get(request), self._finish_supplement)
         if self._pending:
+            self.changed.emit()
+        else:
+            self._complete()
+
+    def _post_anilist(self, page):
+        from .anilist import URL, QUERY
+        request = self._request(URL, 12000)
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        body = {"query": QUERY, "variables": {"search": self._keyword, "page": page}}
+        self._track(self._network.post(request, json.dumps(body).encode("utf-8")),
+                    lambda reply: self._finish_anilist(reply, page))
+
+    def _finish_anilist(self, reply, page):
+        from .anilist import read_page
+        try:
+            code = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            if reply.error() != QNetworkReply.NetworkError.NoError or code is not None and not 200 <= code < 300:
+                raise ValueError(f"HTTP {code}" if code else reply.errorString())
+            rows, more = read_page(json.loads(bytes(reply.readAll())))
+        except (ValueError, KeyError, TypeError, AttributeError) as error:
+            logging.getLogger(__name__).warning("AniList fallback failed: %s", error)
+            if self._primary:
+                self._publish(self._primary)
+            else:
+                self._status, self._error = "error", self._fallback_error + " 备用作品服务也暂不可用。"
+                self.changed.emit()
+            return
+        seen = {row["id"] for row in self._primary}
+        self._primary.extend(row for row in rows if row["id"] not in seen)
+        self._primary_total = len(self._primary)
+        if more and rows and page < 2:
+            self._post_anilist(page + 1)
             self.changed.emit()
         else:
             self._complete()

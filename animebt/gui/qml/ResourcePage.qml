@@ -209,7 +209,7 @@ Item {
         rowSpacing: 3
 
         ShadowText { theme: colors;
-            baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+            baseStyle: Text.Normal
 
             text: field.label
             color: colors.muted
@@ -327,7 +327,7 @@ Item {
                             }
                         }
                         ShadowText { theme: colors;
-                            baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                            baseStyle: Text.Normal
 
                             Layout.fillWidth: true
                             visible: !page.backend.listMode
@@ -344,7 +344,7 @@ Item {
                             implicitHeight: Math.max(original.visible ? original.implicitHeight : 0,
                                                      airtime.visible ? airtime.implicitHeight : 0)
                             ShadowText { theme: colors;
-                                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                                baseStyle: Text.Normal
 
                                 id: original
                                 anchors.verticalCenter: parent.verticalCenter
@@ -358,7 +358,7 @@ Item {
                                 font: colors.originalFont(text, 14)
                             }
                             ShadowText { theme: colors;
-                                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                                baseStyle: Text.Normal
 
                                 id: airtime
                                 anchors.verticalCenter: parent.verticalCenter
@@ -390,7 +390,7 @@ Item {
                     visible: opacity > 0
                     colors: page.colors
                     optics: page.optics
-                    animate: page.loadingMotion > 0 && page.optics.enabled
+                    animate: page.loadingMotion > 0
                 }
             }
 
@@ -443,7 +443,7 @@ Item {
                                     anchors.rightMargin: 7
                                     spacing: 2
                                     ShadowText { theme: colors;
-                                        baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                                        baseStyle: Text.Normal
 
                                         width: parent.width
                                         text: source.modelData.name
@@ -454,7 +454,7 @@ Item {
                                         font.weight: Font.DemiBold
                                     }
                                     ShadowText { theme: colors;
-                                        baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                                        baseStyle: Text.Normal
 
                                         width: parent.width
                                         text: source.modelData.status === "搜索中" ? "搜索中"
@@ -484,7 +484,7 @@ Item {
             }
 
             ShadowText { theme: colors;
-                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                baseStyle: Text.Normal
 
                 Layout.fillWidth: true
                 Layout.bottomMargin: 7
@@ -713,9 +713,10 @@ Item {
                     y: Math.max(10, (parent.height - height) / 2)
                     spacing: 7
                     ShadowText { theme: colors;
-                        baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                        baseStyle: Text.Normal
 
                         objectName: "resourceTitle"
+                        softTextShadow: true
                         width: parent.width
                         // Keep a single sanitized format even while toggling AI:
                         // switching text and textFormat independently can briefly
@@ -727,8 +728,8 @@ Item {
                         lineHeight: 1.22
                         color: colors.ink
                         font: {
-                            const titleFont = colors.originalFont(page.assistant.originalTitle(entry.modelData.title), page.width < 720 ? 16 : 17)
-                            titleFont.weight = Font.Medium
+                            const titleFont = colors.originalFont(page.assistant.originalTitle(entry.modelData.title), colors.wallpaperTextShadow ? (page.width < 720 ? 18 : 19) : (page.width < 720 ? 16 : 17))
+                            titleFont.weight = colors.wallpaperTextShadow ? Font.Bold : Font.Medium
                             return titleFont
                         }
                     }
@@ -748,7 +749,7 @@ Item {
                                 "来源 " + entry.modelData.sources
                             ]
                             ShadowText { theme: colors;
-                                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                                baseStyle: Text.Normal
 
                                 required property string modelData
                                 visible: modelData.length > 0
@@ -764,7 +765,7 @@ Item {
                 }
             }
             ShadowText { theme: colors;
-                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+                baseStyle: Text.Normal
 
                 anchors.centerIn: parent
                 visible: !page.backend.loading && list.count === 0

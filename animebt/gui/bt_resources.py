@@ -71,6 +71,8 @@ async def fetch_episode_page(client, subject_id, offset, limit=100):
 
 
 async def subject_episodes(client, subject_id, cache=None):
+    if subject_id < 0:
+        return []
     initial = await fetch_episode_page(client, subject_id, 0)
     if initial is None:
         return []
@@ -138,6 +140,8 @@ async def collect_resources(service, subject, siblings, update, refresh=False, e
 
     def add_targeted_episodes(matcher, candidates):
         subject_id = subject["id"]
+        if subject.get("provider") == "anilist":
+            return
         tv = matcher.tv_matchers.get(subject_id)
         if tv is None or tv.seasons:
             return
