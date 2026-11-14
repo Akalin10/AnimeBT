@@ -24,7 +24,8 @@ T.TextField {
     selectedTextColor: colors.ink
     readonly property bool editingMenuOpen: editingMenu.visible
 
-    Text {
+    ShadowText { theme: control.colors;
+        objectName: "fieldPlaceholder"
         x: control.leftPadding
         y: control.topPadding
         width: control.width - control.leftPadding - control.rightPadding
@@ -56,7 +57,7 @@ T.TextField {
         objectName: "glassEditingMenu"
         colors: control.colors
         optics: control.optics
-        backdropTier: control.inModalPanel ? GlassSurface.Dialog : GlassSurface.Scene
+        backdropTier: control.inModalPanel ? GlassSurface.Dialog : GlassSurface.Ambient
         dimBackdrop: control.inModalPanel
         GlassMenuItem {
             colors: control.colors
@@ -151,13 +152,14 @@ T.TextField {
     }
 
     background: GlassSurface {
+        material: GlassSurface.Control
         optics: control.optics
         implicitHeight: 35
-        radius: 10
-        backdropTier: control.inModalPanel ? GlassSurface.Scene : GlassSurface.Ambient
+        radius: control.colors.controlRadius
+        backdropTier: control.inModalPanel ? GlassSurface.Dialog : GlassSurface.Ambient
         readingPlate: control.inModalPanel
         dimBackdrop: control.inModalPanel
         tint: control.hovered ? control.colors.controlHover : control.colors.controlBase
-        focused: control.activeFocus
+        focused: control.activeFocus || control.hovered
     }
 }

@@ -26,6 +26,8 @@ Rectangle {
         GradientStop { position: 1; color: splash.opaque(splash.colors.backgroundBottom) }
     }
 
+    AmbientBackground { anchors.fill: parent; colors: splash.colors; radius: splash.radius; strength: 0.35 }
+
     Column {
         anchors.centerIn: parent
         spacing: 16

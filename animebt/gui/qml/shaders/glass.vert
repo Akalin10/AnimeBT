@@ -15,6 +15,10 @@ layout(std140, binding = 0) uniform GlassUniforms {
     float compact;
     float dim;
     float panel;
+    float material;
+    float highlight;
+    float opticalStrength;
+    float plateRim;
     vec2 readingRange;
     vec2 controlSize;
     vec2 viewportSize;

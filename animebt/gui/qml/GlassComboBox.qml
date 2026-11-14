@@ -13,7 +13,7 @@ ComboBox {
     scale: optics.motion > 0 && down ? 0.98 : 1
     Behavior on scale { NumberAnimation { duration: control.optics.motion; easing.type: Easing.OutCubic } }
 
-    contentItem: Text {
+    contentItem: ShadowText { theme: control.colors;
         text: control.displayText
         textFormat: Text.PlainText
         color: control.enabled ? control.colors.ink : control.colors.muted
@@ -33,7 +33,7 @@ ComboBox {
     background: GlassSurface {
         objectName: "comboGlass"
         optics: control.optics
-        radius: 10
+        radius: control.colors.controlRadius
         implicitHeight: 38
         tint: control.down ? control.colors.controlPressed
              : control.hovered ? control.colors.controlHover : control.colors.controlBase

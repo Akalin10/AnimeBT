@@ -18,12 +18,12 @@ Item {
     property real reflowScale: 1
     signal posterActivated(int subjectId, Item coverItem, url cover)
     readonly property var selected: catalog.selected
-    readonly property int gap: 12
+    readonly property int gap: 16
     readonly property int subjectCount: subjects.count
     readonly property int columnCount: columnsFor(preferredWidth)
     readonly property real cardWidth: widthFor(preferredWidth)
     readonly property real extraSpace: Math.max(0, width - cardWidth * columnCount - gap * (columnCount - 1)) / (columnCount + 1)
-    readonly property int titleSize: Math.round(Math.max(16, Math.min(20, 12 + cardWidth / 28)))
+    readonly property int titleSize: Math.round(Math.max(16, Math.min(19, 12 + cardWidth / 30)))
     readonly property int captionSize: cardWidth < 170 ? 13 : 14
     readonly property int captionInset: cardWidth < 145 ? 8 : 12
     readonly property int infoHeight: 2 * captionInset + 2 * Math.ceil(titleMetrics.implicitHeight)
@@ -49,20 +49,20 @@ Item {
     }
 
     // Measure shaped lines so the CJK fallback contributes its actual height.
-    Text {
+    ShadowText { theme: colors;
         id: titleMetrics
         visible: false
         text: "动画 Season 2"
         font.pixelSize: section.titleSize
-        font.weight: Font.Bold
+        font.weight: Font.DemiBold
     }
-    Text {
+    ShadowText { theme: colors;
         id: captionMetrics
         visible: false
         text: "2026年10月番"
         font.pixelSize: section.captionSize
     }
-    Text {
+    ShadowText { theme: colors;
         id: originalMetrics
         visible: false
         text: "アニメ Season 2"
@@ -170,8 +170,9 @@ Item {
                     optics: section.optics
                     renderOptics: card.inViewport
                     compact: true
-                    radius: 16
-                    outline: card.chosen || card.visualFocus ? colors.accent : section.optics.edge
+                    radius: section.colors.cardRadius
+                    readingPlate: true
+                    outline: card.chosen || card.visualFocus ? colors.accent : "transparent"
                     tint: card.hovered ? colors.controlHover : colors.controlBase
                 }
                 contentItem: Item {
@@ -182,7 +183,7 @@ Item {
                         height: width * 1.5
                         radius: 16
                         opacity: card.modelData.id === section.hiddenSubjectId ? 0 : 1
-                        color: colors.panelFaint
+                        color: "transparent"
                         readonly property bool hardwareMask: GraphicsInfo.api !== GraphicsInfo.Software
 
                         Glyph {
@@ -191,7 +192,7 @@ Item {
                             ink: colors.muted
                             path: "M5 3 H15 Q17 3 17 5 V15 Q17 17 15 17 H5 Q3 17 3 15 V5 Q3 3 5 3 Z M4 14 L8 10 L11 13 L14 9 L16 11 M7 7 h0.1"
                         }
-                        Text {
+                        ShadowText { theme: colors;
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 14
@@ -236,8 +237,8 @@ Item {
                             anchors.fill: parent
                             radius: poster.radius
                             color: "transparent"
-                            border.width: card.chosen || card.visualFocus ? 2 : 1
-                            border.color: card.chosen || card.visualFocus ? colors.accent : section.optics.edge
+                            border.width: 1
+                            border.color: card.chosen || card.visualFocus ? colors.accent : "transparent"
                         }
                     }
 
@@ -250,7 +251,7 @@ Item {
                         width: parent.width - 2 * x
                         height: section.infoHeight - 2 * section.captionInset
 
-                        Text {
+                        ShadowText { theme: colors;
                             id: title
                             objectName: "posterTitle"
                             width: parent.width
@@ -261,9 +262,9 @@ Item {
                             elide: Text.ElideRight
                             color: colors.ink
                             font.pixelSize: section.titleSize
-                            font.weight: Font.Bold
+                            font.weight: Font.DemiBold
                         }
-                        Text {
+                        ShadowText { theme: colors;
                             id: original
                             objectName: "posterOriginal"
                             width: parent.width
@@ -276,7 +277,7 @@ Item {
                             color: colors.muted
                             font: colors.originalFont(text, section.captionSize)
                         }
-                        Text {
+                        ShadowText { theme: colors;
                             objectName: "posterAirtime"
                             anchors.top: original.visible ? original.bottom : title.bottom
                             anchors.topMargin: 9

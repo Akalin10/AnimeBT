@@ -10,11 +10,16 @@ Popup {
     palette.text: colors.ink
     palette.buttonText: colors.ink
     popupType: Popup.Item
+    topInset: 0
+    bottomInset: 0
+    leftInset: 0
+    rightInset: 0
     dim: false
     padding: 6
     margins: 8
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     background: GlassPopupFrame {
+        menuSurface: true
         colors: popup.colors
         optics: popup.optics
         radius: popup.cornerRadius

@@ -13,7 +13,7 @@ Button {
     scale: optics.motion > 0 && down ? 0.97 : 1
     Behavior on scale { NumberAnimation { duration: control.optics.motion; easing.type: Easing.OutCubic } }
 
-    contentItem: Text {
+    contentItem: ShadowText { theme: control.colors;
         text: control.text
         textFormat: Text.PlainText
         color: control.enabled ? control.colors.accentText : control.colors.muted
@@ -23,14 +23,16 @@ Button {
         verticalAlignment: Text.AlignVCenter
     }
     background: GlassSurface {
+        material: GlassSurface.Control
         optics: control.optics
         implicitHeight: 38
-        radius: 11
+        radius: control.colors.controlRadius
         backdropTier: control.backdropTier
         readingPlate: control.backdropTier !== GlassSurface.Ambient
         dimBackdrop: control.dimBackdrop
         tint: control.down ? control.colors.controlPressed
              : control.hovered ? control.colors.controlHover : control.colors.controlBase
         focused: control.visualFocus
+        highlight: control.hovered || control.visualFocus ? 1 : 0
     }
 }

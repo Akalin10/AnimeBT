@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
 import QtQuick.Layouts
-import QtQuick.Shapes
 import QtCore
+import QtQuick.Dialogs
 
 Window {
     id: window
@@ -18,9 +18,9 @@ Window {
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint
 
     readonly property bool maximized: visibility === Window.Maximized
-    readonly property int frameInset: maximized ? 0 : 20
-    readonly property int frameRadius: maximized ? 0 : 26
-    readonly property int contentInset: surface.width >= 1100 ? 22 : 16
+    readonly property int frameInset: maximized ? 0 : 12
+    readonly property int frameRadius: maximized ? 0 : 28
+    readonly property int contentInset: surface.width >= 1100 ? 18 : 14
     required property url appearanceLocation
     property QtObject typography: null
     readonly property color ink: themeColors.ink
@@ -55,12 +55,73 @@ Window {
         id: appearance
         location: window.appearanceLocation
         property bool darkMode: false
+        property bool liquidGlass: true
         property bool animations: true
         property bool startupAnimation: true
         property int posterSizeStep: 2
         property string searchMode: "poster"
+        property real glassFrostLight: 0
+        property real glassFrostDark: 0
+        property url wallpaperSource: ""
+        property bool wallpaperEnabled: false
+        property string wallpaperFit: "fill"
+        property real wallpaperBrightness: 100
+    }
+    readonly property url wallpaperSource: appearance.wallpaperSource
+    readonly property bool wallpaperEnabled: appearance.wallpaperEnabled
+    readonly property string wallpaperFit: appearance.wallpaperFit
+    readonly property real wallpaperBrightness: Math.max(0, Math.min(100, appearance.wallpaperBrightness))
+    function setWallpaperBrightness(value) {
+        const amount = Math.max(0, Math.min(100, Number(value)))
+        if (!isFinite(amount)) return
+        appearance.wallpaperBrightness = amount
+        wallpaperSaveTimer.restart()
+    }
+    Timer {
+        id: wallpaperSaveTimer
+        interval: 250
+        onTriggered: window.saveWallpaper()
+    }
+    property string wallpaperError: ""
+    function selectWallpaper(file) {
+        const url = String(file)
+        if (!url.toLowerCase().startsWith("file:") || !/\.(jpe?g|png|webp)$/i.test(url)) {
+            wallpaperError = "请选择本地 JPG、PNG 或 WebP 图片"
+            return false
+        }
+        wallpaperError = ""
+        appearance.wallpaperSource = url
+        appearance.wallpaperEnabled = true
+        saveWallpaper()
+        return true
+    }
+    function setWallpaperEnabled(value) {
+        appearance.wallpaperEnabled = value && String(appearance.wallpaperSource).length > 0
+        wallpaperError = ""
+        saveWallpaper()
+    }
+    function setWallpaperFit(index) {
+        appearance.wallpaperFit = Number(index) === 1 ? "fit" : "fill"
+        saveWallpaper()
+    }
+    function saveWallpaper() {
+        wallpaperSaveTimer.stop()
+        appearance.setValue("wallpaperSource", appearance.wallpaperSource)
+        appearance.setValue("wallpaperEnabled", appearance.wallpaperEnabled)
+        appearance.setValue("wallpaperFit", appearance.wallpaperFit)
+        appearance.setValue("wallpaperBrightness", window.wallpaperBrightness)
+        appearance.sync()
+    }
+    FileDialog {
+        id: wallpaperPicker
+        objectName: "wallpaperPicker"
+        title: "选择背景图片"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["图片 (*.jpg *.jpeg *.png *.webp)"]
+        onAccepted: window.selectWallpaper(selectedFile)
     }
     Component.onCompleted: {
+        resourceSearch.attachTitleAssistant(titleAssistant)
         posterGrid.preferredWidth = posterWidths[posterStep]
         startupActive = startupMotionAllowed && appearance.startupAnimation && appearance.animations
         resourceSearch.setListMode(listMode)
@@ -69,22 +130,66 @@ Window {
         id: glassOptics
         objectName: "glassThemeManager"
         colors: themeColors
-        enabled: backdropLayer.hardware
-        level: themeColors.dark ? 0.24 : 0.30
+        liquidGlass: appearance.liquidGlass
+        enabled: appearance.liquidGlass && backdropLayer.hardware
+        level: window.glassFrost / 100
         viewport: Qt.size(window.width, window.height)
         motion: window.motion
-        ambientBackdrop: backdropTexture
+        sharedBlur: true
+        ambientBackdrop: sharedBlur.texture
         sceneBackdrop: sceneTexture
         dialogBackdrop: dialogTexture
         dialogRect: {
             const panel = window.dialogVisual
-            return panel ? Qt.rect(panel.x / window.width, panel.y / window.height,
-                                  panel.width / window.width, panel.height / window.height) : Qt.rect(0, 0, 0, 0)
+            if (!panel)
+                return Qt.rect(0, 0, 0, 0)
+            const origin = window.dialogOrigin
+            return Qt.rect(origin.x / window.width, origin.y / window.height,
+                           panel.width / window.width, panel.height / window.height)
         }
     }
-    readonly property Item dialogVisual: assistantSettings.visible ? assistantSettings.background.parent : null
+    // Capture the lower material plane, never the controls/text which sample it.
+    readonly property Item dialogVisual: assistantSettings.visible ? assistantSettings.background : null
+    readonly property real glassFrost: Math.max(0, Math.min(100,
+        themeColors.dark ? appearance.glassFrostDark : appearance.glassFrostLight))
+    function changeGlassFrost(value) {
+        const amount = Math.max(0, Math.min(100, Number(value)))
+        if (!isFinite(amount))
+            return
+        if (themeColors.dark)
+            appearance.glassFrostDark = amount
+        else
+            appearance.glassFrostLight = amount
+        materialSaveTimer.restart()
+    }
+    function saveGlassFrost() {
+        materialSaveTimer.stop()
+        appearance.setValue("glassFrostLight", appearance.glassFrostLight)
+        appearance.setValue("glassFrostDark", appearance.glassFrostDark)
+        appearance.sync()
+    }
+    Timer {
+        id: materialSaveTimer
+        interval: 250
+        onTriggered: window.saveGlassFrost()
+    }
+    onClosing: {
+        if (materialSaveTimer.running) saveGlassFrost()
+        if (wallpaperSaveTimer.running) saveWallpaper()
+    }
+    readonly property point dialogOrigin: {
+        const panel = dialogVisual
+        const visual = panel ? panel.parent : null
+        // Track the popup item's x/y explicitly; mapToItem alone does not create
+        // geometry dependencies when a status message changes popup height.
+        return visual && visual.parent
+            ? visual.parent.mapToItem(window.contentItem, visual.x + panel.x, visual.y + panel.y)
+            : Qt.point(0, 0)
+    }
     GlassTheme {
         id: themeColors
+        wallpaperTextShadow: wallpaperLayer.active
+        liquidGlass: appearance.liquidGlass
         dark: appearance.darkMode
         typography: window.typography
     }
@@ -330,8 +435,10 @@ Window {
         property string glyphPath
         property bool destructive: false
         property bool floating: false
-        width: 44
-        height: 44
+        property bool chromeCompact: false
+        width: chromeCompact ? 36 : 44
+        height: chromeCompact ? 36 : 44
+        padding: 0
         hoverEnabled: true
         focusPolicy: Qt.TabFocus
         Accessible.name: text
@@ -355,36 +462,12 @@ Window {
 
         background: GlassSurface {
             optics: glassOptics
-            radius: 12
+            radius: control.chromeCompact ? 10 : 12
             visible: control.floating || control.hovered || control.visualFocus
-            focused: control.visualFocus
+            focused: control.visualFocus || control.hovered
             tint: control.destructive && control.hovered ? themeColors.dangerFill
                 : control.down ? themeColors.controlPressed
                 : control.hovered ? themeColors.controlHover : glassOptics.tint
-        }
-    }
-
-    component LightPool: Shape {
-        id: pool
-        property color glow
-        Behavior on glow { ColorAnimation { duration: window.motion; easing.type: Easing.InOutSine } }
-        preferredRendererType: Shape.CurveRenderer
-
-        ShapePath {
-            strokeWidth: -1
-            fillGradient: RadialGradient {
-                centerX: pool.width / 2
-                centerY: pool.height / 2
-                focalX: centerX
-                focalY: centerY
-                centerRadius: pool.width / 2
-                GradientStop { position: 0; color: pool.glow }
-                GradientStop { position: 1; color: "transparent" }
-            }
-            PathLine { x: pool.width; y: 0 }
-            PathLine { x: pool.width; y: pool.height }
-            PathLine { x: 0; y: pool.height }
-            PathLine { x: 0; y: 0 }
         }
     }
 
@@ -404,17 +487,20 @@ Window {
         color: themeColors.silhouette
     }
 
-    MultiEffect {
+    Loader {
         parent: sceneContent
         z: -3
         anchors.fill: silhouette
-        visible: !window.maximized
-        source: silhouette
-        shadowEnabled: true
-        shadowBlur: 0.85
-        blurMax: 24
-        shadowVerticalOffset: 5
-        shadowColor: themeColors.shadow
+        active: themeColors.liquidGlass && !window.maximized
+        sourceComponent: MultiEffect {
+            anchors.fill: parent
+            source: silhouette
+            shadowEnabled: true
+            shadowBlur: 0.85
+            blurMax: 24
+            shadowVerticalOffset: 5
+            shadowColor: themeColors.shadow
+        }
     }
 
     Item {
@@ -429,29 +515,28 @@ Window {
             anchors.fill: parent
             anchors.margins: window.frameInset
             radius: window.frameRadius
-            gradient: Gradient {
-                GradientStop { position: 0; color: themeColors.backgroundTop }
-                GradientStop { position: 0.58; color: themeColors.backgroundMiddle }
-                GradientStop { position: 1; color: themeColors.backgroundBottom }
-            }
-
-            LightPool {
-                width: Math.min(600, surface.width - 60)
-                height: width
-                x: surface.width - width - 30
-                y: Math.max(20, (surface.height - height) * 0.28)
-                scale: Math.min(1, (surface.height - 40) / height)
-                glow: themeColors.accentGlow
-            }
-            LightPool {
-                width: Math.min(440, surface.width * 0.64)
-                height: width
-                x: 24
-                y: Math.max(20, surface.height - height - 24)
-                glow: themeColors.tealGlow
-            }
+            visible: wallpaperLayer.active
+            color: themeColors.backgroundTop
         }
-
+        AmbientBackground {
+            anchors.fill: parent
+            anchors.margins: window.frameInset
+            colors: themeColors
+            radius: window.frameRadius
+            visible: !wallpaperLayer.active
+        }
+        WallpaperBackground {
+            id: wallpaperLayer
+            anchors.fill: parent
+            anchors.margins: window.frameInset
+            source: appearance.wallpaperSource
+            enabledWallpaper: appearance.liquidGlass && appearance.wallpaperEnabled
+            fit: appearance.wallpaperFit === "fit"
+            brightness: window.wallpaperBrightness
+            radius: window.frameRadius
+            onFailed: window.wallpaperError = "图片不可用，已恢复默认背景"
+            onReady: window.wallpaperError = ""
+        }
     }
 
     // Captures are ordered from ambient to page to the lower modal panel.
@@ -460,6 +545,13 @@ Window {
         id: backdropTexture
         objectName: "ambientGlassCapture"
         sourceItem: glassOptics.enabled ? backdropLayer : null
+    }
+    BackdropBlur {
+        id: sharedBlur
+        sourceTexture: backdropTexture
+        enabledBlur: glassOptics.enabled
+        radius: glassOptics.blurRadius
+        viewport: glassOptics.viewport
     }
     GlassBackdrop {
         id: sceneTexture
@@ -471,8 +563,12 @@ Window {
         objectName: "dialogGlassCapture"
         sourceItem: glassOptics.enabled && glassOptics.dialogUsers > 0 ? window.dialogVisual : null
         // Preserve window-space UVs for glass surfaces inside the captured dialog.
-        sourceRect: sourceItem ? Qt.rect(-sourceItem.x, -sourceItem.y, window.width, window.height)
-                               : Qt.rect(0, 0, 0, 0)
+        sourceRect: {
+            if (!sourceItem)
+                return Qt.rect(0, 0, 0, 0)
+            const origin = window.dialogOrigin
+            return Qt.rect(-origin.x, -origin.y, window.width, window.height)
+        }
     }
 
     Rectangle {
@@ -492,19 +588,34 @@ Window {
         }
 
         Item {
+            id: chromeLayer
+            objectName: "fixedWindowChrome"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: titleBar.y + titleBar.height + 10
+            z: 20
+        }
+
+        Item {
             id: titleBar
-        z: 4
+            objectName: "windowTitleBar"
+            parent: chromeLayer
+            z: 1
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 14
+            anchors.leftMargin: window.contentInset
+            anchors.rightMargin: window.contentInset
+            anchors.topMargin: 8
             height: 48
 
             GlassSurface {
                 objectName: "titleBarGlass"
+                material: GlassSurface.Chrome
                 anchors.fill: parent
                 optics: glassOptics
-                radius: 16
+                radius: 20
             }
 
             Item {
@@ -538,10 +649,7 @@ Window {
                         radius: 11
                         border.color: homeButton.hovered || homeButton.visualFocus
                             ? themeColors.accent : themeColors.frame
-                        gradient: Gradient {
-                            GradientStop { position: 0; color: themeColors.badgeTop }
-                            GradientStop { position: 1; color: themeColors.badgeBottom }
-                        }
+                        color: "transparent"
                     }
                     contentItem: Image {
                         source: "../assets/icon.png"
@@ -549,23 +657,24 @@ Window {
                         smooth: true
                     }
                 }
-                Text {
+                ShadowText { theme: themeColors;
                     anchors.verticalCenter: parent.verticalCenter
                     text: "AnimeBT"
                     color: window.ink
                     font.pixelSize: 19
-                    font.weight: Font.Bold
+                    font.weight: Font.DemiBold
                 }
             }
 
             Row {
                 id: actions
                 anchors.right: parent.right
+                anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 3
                 ChromeButton {
                     objectName: "settingsButton"
-                    floating: true
+                    chromeCompact: true
                     text: "设置"
                     glyphPath: "M3 5 H17 M3 10 H17 M3 15 H17 M7 3 V7 M13 8 V12 M8 13 V17"
                     onClicked: settingsPopup.open()
@@ -580,12 +689,14 @@ Window {
                 Item { width: 7; height: 1 }
                 ChromeButton {
                     objectName: "minimizeButton"
+                    chromeCompact: true
                     text: "最小化"
                     glyphPath: "M5 12 H15"
                     onClicked: window.showMinimized()
                 }
                 ChromeButton {
                     objectName: "maximizeButton"
+                    chromeCompact: true
                     text: window.maximized ? "还原" : "最大化"
                     glyphPath: window.maximized ? "M8 5 H15 V12 M5 8 H12 V15 H5 Z"
                                                 : "M5 5 H15 V15 H5 Z"
@@ -593,6 +704,7 @@ Window {
                 }
                 ChromeButton {
                     objectName: "closeButton"
+                    chromeCompact: true
                     text: "关闭"
                     destructive: true
                     glyphPath: "M5 5 L15 15 M15 5 L5 15"
@@ -615,7 +727,7 @@ Window {
                 visible: opacity > 0
                 opacity: window.resourceSearch.active && !window.listMode ? 0 : 1
                 Behavior on opacity { NumberAnimation { duration: window.motion; easing.type: Easing.OutCubic } }
-                y: window.scrollCatalogHeader ? 0 : titleBar.y + titleBar.height
+                y: window.scrollCatalogHeader ? 0 : chromeLayer.height
                 anchors.left: parent.left
                 anchors.right: parent.right
                 height: window.hasSearched ? 84 : (surface.height < 580 ? 216 : 276)
@@ -624,7 +736,7 @@ Window {
                     NumberAnimation { duration: window.navigationDuration; easing.type: Easing.InOutCubic }
                 }
 
-                Text {
+                ShadowText { theme: themeColors;
                     objectName: "searchHomeTitle"
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: surface.height < 580 ? 24 : 36
@@ -634,7 +746,7 @@ Window {
                     text: "Search"
                     color: window.ink
                     font.pixelSize: surface.height < 580 ? 56 : 72
-                    font.weight: Font.Bold
+                    font.weight: Font.DemiBold
                     font.letterSpacing: -0.8
                 }
 
@@ -729,9 +841,10 @@ Window {
                             else
                                 window.submitSearch()
                         }
-                        contentItem: Text {
+                        contentItem: ShadowText { theme: themeColors;
                             text: searchButton.text
-                            color: searchButton.enabled ? themeColors.accentText : window.muted
+                            color: themeColors.plainDark && searchButton.enabled ? themeColors.accentInk
+                                 : searchButton.enabled ? themeColors.accentText : window.muted
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                             font.pixelSize: themeColors.textSize
@@ -741,7 +854,9 @@ Window {
                             objectName: "searchButtonGlass"
                             optics: glassOptics
                             radius: 22
-                            tint: !searchButton.enabled ? themeColors.controlBase
+                            tint: themeColors.plainDark && searchButton.enabled
+                                ? (searchButton.down ? themeColors.accentPressed : searchButton.hovered ? themeColors.accentHover : themeColors.accent)
+                                : !searchButton.enabled ? themeColors.controlBase
                                 : searchButton.down ? themeColors.controlPressed
                                 : searchButton.hovered ? themeColors.controlHover : themeColors.controlSelected
                             focused: searchButton.visualFocus
@@ -760,20 +875,19 @@ Window {
                 height: parent.height
                 topLeftRadius: window.frameRadius
                 topRightRadius: window.frameRadius
-                color: glassOptics.readingColor(themeColors.controlBase)
+                color: "transparent"
                 opacity: window.hasSearched && (window.listMode || !window.resourceSearch.active) ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: window.motion } }
                 visible: opacity > 0
             }
 
-            Text {
+            ShadowText { theme: themeColors;
                 id: searchStatus
                 objectName: "searchStatus"
                 z: 3
                 x: window.contentInset
                 anchors.top: searchArea.bottom
                 width: surface.width - 2 * x
-                height: text.length > 0 ? implicitHeight : 0
                 text: {
                     switch (window.catalog.status) {
                     case "loading": return ""
@@ -807,7 +921,7 @@ Window {
             enabled: !window.resourceSearch.active
             opacity: window.resourceSearch.active ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: window.navigationDuration; easing.type: Easing.OutCubic } }
-            anchors.top: titleBar.bottom
+            anchors.top: chromeLayer.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -815,7 +929,8 @@ Window {
             contentHeight: posterGrid.y + posterGrid.height + 8
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {
+            ScrollBar.vertical: GlassScrollBar {
+                colors: themeColors
                 id: catalogScrollBar
                 objectName: "catalogScrollBar"
                 anchors.right: page.right
@@ -851,7 +966,7 @@ Window {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: 14
-            anchors.topMargin: window.listMode ? catalogTop.height + 6 : titleBar.y + titleBar.height + 14
+            anchors.topMargin: window.listMode ? catalogTop.height + 6 : chromeLayer.height + 14
             anchors.leftMargin: window.contentInset
             anchors.rightMargin: window.contentInset
             active: window.resourceSearch.active || window.flightRunning || opacity > 0
@@ -894,7 +1009,7 @@ Window {
             id: actionToast
             objectName: "resourceToast"
             parent: window.contentItem
-            backdropTier: GlassSurface.Scene
+            backdropTier: GlassSurface.Ambient
             readingPlate: true
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -910,7 +1025,7 @@ Window {
             property bool success: true
             tint: success ? glassOptics.tint : themeColors.dangerFill
             Behavior on opacity { NumberAnimation { duration: window.motion } }
-            Text {
+            ShadowText { theme: themeColors;
                 id: toastLabel
                 objectName: "resourceToastText"
                 anchors.centerIn: parent
@@ -938,7 +1053,7 @@ Window {
             colors: themeColors
             optics: glassOptics
             x: surface.width - width - 22
-            y: titleBar.y + titleBar.height + 6
+            y: chromeLayer.height + 6
             width: 324
             height: Math.min(implicitHeight, surface.height - y - 12)
             padding: 18
@@ -951,17 +1066,18 @@ Window {
                 contentWidth: availableWidth
                 clip: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: GlassScrollBar { colors: themeColors }
                 Column {
                     id: settingsContent
                     width: settingsScroll.availableWidth
                     spacing: 8
-                    Text {
+                    ShadowText { theme: themeColors;
                         text: "设置"
                         color: window.ink
                         font.pixelSize: 24
-                        font.weight: Font.Bold
+                        font.weight: Font.DemiBold
                     }
-                    Text {
+                    ShadowText { theme: themeColors;
                         text: "搜索模式"
                         color: window.muted
                         font.pixelSize: themeColors.detailTextSize
@@ -973,7 +1089,7 @@ Window {
                             objectName: "posterModeOption"
                             colors: themeColors
                             optics: glassOptics
-                            text: "海报模式"
+                            text: "图鉴检索"
                             checked: !window.listMode
                             ButtonGroup.group: searchModes
                             onClicked: window.changeSearchMode("poster")
@@ -982,13 +1098,28 @@ Window {
                             objectName: "listModeOption"
                             colors: themeColors
                             optics: glassOptics
-                            text: "列表模式"
+                            text: "列表检索"
                             checked: window.listMode
                             ButtonGroup.group: searchModes
                             onClicked: window.changeSearchMode("list")
                         }
                     }
-                    Switch {
+                    GlassSwitch {
+                        objectName: "liquidGlassSwitch"
+                        width: parent.width
+                        colors: themeColors
+                        optics: glassOptics
+                        text: "Liquid Glass"
+                        checked: appearance.liquidGlass
+                        onToggled: {
+                            appearance.liquidGlass = checked
+                            appearance.setValue("liquidGlass", checked)
+                            appearance.sync()
+                        }
+                    }
+                    GlassSwitch {
+                        colors: themeColors
+                        optics: glassOptics
                         objectName: "darkModeSwitch"
                         text: "深色模式"
                         checked: appearance.darkMode
@@ -998,7 +1129,9 @@ Window {
                             appearance.sync()
                         }
                     }
-                    Switch {
+                    GlassSwitch {
+                        colors: themeColors
+                        optics: glassOptics
                         objectName: "motionSwitch"
                         text: "界面动画"
                         checked: window.animate
@@ -1008,7 +1141,9 @@ Window {
                             appearance.sync()
                         }
                     }
-                    Switch {
+                    GlassSwitch {
+                        colors: themeColors
+                        optics: glassOptics
                         objectName: "startupAnimationSwitch"
                         text: "启动动画"
                         checked: appearance.startupAnimation
@@ -1018,10 +1153,48 @@ Window {
                             appearance.sync()
                         }
                     }
+                    Column {
+                        enabled: appearance.liquidGlass
+                        width: parent.width
+                        spacing: 5
+                        RowLayout {
+                            width: parent.width
+                            ShadowText { theme: themeColors;
+                                Layout.fillWidth: true
+                                text: "Clear ↔ Tinted"
+                                color: window.ink
+                                font.pixelSize: themeColors.detailTextSize
+                            }
+                            ShadowText { theme: themeColors;
+                                text: Math.round(window.glassFrost) + "%"
+                                color: window.muted
+                                font.pixelSize: themeColors.smallTextSize
+                            }
+                        }
+                        GlassSlider {
+                            objectName: "glassFrostSlider"
+                            from: 0
+                            to: 100
+                            stepSize: 0.1
+                            width: parent.width
+                            colors: themeColors
+                            optics: glassOptics
+                            value: window.glassFrost
+                            Accessible.name: "Clear 到 Tinted 背景磨砂强度"
+                            onMoved: window.changeGlassFrost(value)
+                            onPressedChanged: if (!pressed) window.saveGlassFrost()
+                        }
+                        RowLayout {
+                            width: parent.width
+                            ShadowText { theme: themeColors; text: "Clear 清透"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                            Item { Layout.fillWidth: true }
+                            ShadowText { theme: themeColors; text: "Tinted 磨砂"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                        }
+                    }
                     RowLayout {
                         width: parent.width
                         spacing: 12
-                        Text {
+                        ShadowText { theme: themeColors;
                             Layout.fillWidth: true
                             text: "海报尺寸"
                             color: window.ink
@@ -1066,7 +1239,7 @@ Window {
                                         }
                                     }
                                 }
-                                Text {
+                                ShadowText { theme: themeColors;
                                     anchors.right: parent.right
                                     anchors.rightMargin: 11
                                     anchors.verticalCenter: parent.verticalCenter
@@ -1095,11 +1268,94 @@ Window {
                             }
                         }
                     }
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        enabled: appearance.liquidGlass
+                        ShadowText { theme: themeColors; text: "自定义背景"; color: window.ink; font.pixelSize: themeColors.detailTextSize }
+                        GlassSwitch {
+                            objectName: "wallpaperEnabledSwitch"
+                            width: parent.width
+                            colors: themeColors
+                            optics: glassOptics
+                            text: "使用自定义背景"
+                            enabled: String(appearance.wallpaperSource).length > 0
+                            checked: appearance.wallpaperEnabled
+                            onToggled: window.setWallpaperEnabled(checked)
+                        }
+                        RowLayout {
+                            width: parent.width
+                            GlassButton {
+                                objectName: "chooseWallpaperButton"
+                                colors: themeColors; optics: glassOptics
+                                text: "选择图片"
+                                onClicked: wallpaperPicker.open()
+                            }
+                            GlassButton {
+                                objectName: "resetWallpaperButton"
+                                colors: themeColors; optics: glassOptics
+                                text: "恢复默认"
+                                onClicked: window.setWallpaperEnabled(false)
+                            }
+                        }
+                        Image {
+                            objectName: "wallpaperPreview"
+                            width: parent.width
+                            height: String(appearance.wallpaperSource).length ? 104 : 0
+                            visible: height > 0
+                            source: settingsPopup.visible ? appearance.wallpaperSource : ""
+                            sourceSize: Qt.size(320, 180)
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true; cache: true; smooth: true; autoTransform: true
+                        }
+                        GlassComboBox {
+                            objectName: "wallpaperFitCombo"
+                            width: parent.width
+                            colors: themeColors; optics: glassOptics
+                            model: ["填充（裁剪）", "适应"]
+                            currentIndex: appearance.wallpaperFit === "fit" ? 1 : 0
+                            onActivated: window.setWallpaperFit(currentIndex)
+                        }
+                        Column {
+                            width: parent.width
+                            spacing: 5
+                            enabled: wallpaperLayer.active
+                            RowLayout {
+                                width: parent.width
+                                ShadowText { theme: themeColors; Layout.fillWidth: true; text: "背景亮度"; color: window.ink; font.pixelSize: themeColors.detailTextSize }
+                                ShadowText { theme: themeColors; text: Math.round(window.wallpaperBrightness) + "%"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                            }
+                            GlassSlider {
+                                objectName: "wallpaperBrightnessSlider"
+                                width: parent.width
+                                colors: themeColors; optics: glassOptics
+                                from: 0; to: 100; stepSize: 0.1
+                                value: window.wallpaperBrightness
+                                Accessible.name: "背景亮度"
+                                onMoved: window.setWallpaperBrightness(value)
+                                onPressedChanged: if (!pressed) window.saveWallpaper()
+                            }
+                            RowLayout {
+                                width: parent.width
+                                ShadowText { theme: themeColors; text: "较暗"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                                Item { Layout.fillWidth: true }
+                                ShadowText { theme: themeColors; text: "原图"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                            }
+                        }
+                        ShadowText { theme: themeColors;
+                            width: parent.width
+                            visible: text.length > 0
+                            text: window.wallpaperError || (appearance.wallpaperEnabled && !backdropLayer.hardware ? "软件渲染暂使用默认背景" : "")
+                            wrapMode: Text.Wrap
+                            color: themeColors.warning
+                            font.pixelSize: themeColors.smallTextSize
+                        }
+                    }
                     GlassButton {
                         objectName: "titleAssistantSettings"
                         colors: themeColors
                         optics: glassOptics
-                        backdropTier: GlassSurface.Scene
+                        backdropTier: GlassSurface.Ambient
                         text: "AI 智能整理…"
                         onClicked: {
                             settingsPopup.close()

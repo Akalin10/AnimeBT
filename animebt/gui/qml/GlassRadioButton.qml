@@ -27,7 +27,7 @@ RadioButton {
             color: colors.accent
         }
     }
-    contentItem: Text {
+    contentItem: ShadowText { theme: control.colors;
         text: control.text
         color: control.colors.ink
         font.pixelSize: control.colors.textSize
@@ -35,7 +35,7 @@ RadioButton {
     }
     background: GlassSurface {
         optics: control.optics
-        radius: 10
+        radius: control.colors.controlRadius
         focused: control.visualFocus
         tint: control.checked ? colors.controlPressed : control.hovered ? colors.controlHover : colors.controlBase
     }

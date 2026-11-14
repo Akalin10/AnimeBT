@@ -678,7 +678,9 @@ class BTResources(QObject):
         self._cancelled = False
         self._resource_list = ResourceListModel(self)
         self._filtered_resources = ResourceFilterModel(self._resource_list, self)
-        self._facets = {"total": 0, "categories": {}, "episode": [], "resolution": [], "fansub": []}
+        self._facets = {"total": 0, "categories": {}, "season": [], "episode": [], "resolution": [], "fansub": []}
+        self._season_rows = []
+        self._season_assistant = None
         self._sources = []
         self._error = ""
         self._schedule = True
@@ -827,10 +829,29 @@ class BTResources(QObject):
         return self._facets
 
     def _update_rows(self, rows):
-        if self._resource_list.rows == rows:
+        if self._season_rows == rows:
             return
+        self._season_rows = list(rows)
+        self._refresh_seasons()
+
+    @Slot(QObject)
+    def attachTitleAssistant(self, assistant):
+        if self._season_assistant is not None:
+            return
+        from .season_assistant import SeasonAssistant
+        self._season_assistant = SeasonAssistant(assistant, self)
+        self._season_assistant.resultsChanged.connect(self._refresh_seasons)
+        self._refresh_seasons()
+
+    def _refresh_seasons(self):
+        from .resource_seasons import known_seasons, season_labels
+        rows = [dict(row, seasons=season_labels(self._season_assistant.resolve(row)
+                                               if self._season_assistant else known_seasons(row)))
+                for row in self._season_rows]
         self._resource_list.update_rows(rows)
         facets = {"total": len(rows), "categories": dict(Counter(row["category"] for row in rows))}
+        labels = {label for row in rows for label in row["seasons"]}
+        facets["season"] = sorted(labels, key=lambda label: (label == "未知", label))
         for key in ("episode", "resolution", "fansub"):
             facets[key] = sorted({row[key] for row in rows})
         if self._facets != facets:
@@ -872,6 +893,7 @@ class BTResources(QObject):
         self._cancelled = False
         self._update_rows([])
         self._filtered_resources.setFilters("", "", "", "")
+        self._filtered_resources.setSeasonFilter("")
         self.changed.emit()
 
     @Slot(str)
@@ -918,6 +940,8 @@ class BTResources(QObject):
 
     def _cancel_job(self):
         self._generation += 1
+        if self._season_assistant:
+            self._season_assistant.cancel()
         if self._job is not None:
             self._job.cancelled.set()
             self._job = None

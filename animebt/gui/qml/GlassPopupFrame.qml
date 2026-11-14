@@ -1,32 +1,13 @@
 import QtQuick
-import QtQuick.Effects
 
 Item {
     id: frame
     required property GlassTheme colors
     required property GlassThemeManager optics
-    property real radius: 16
-    property int backdropTier: GlassSurface.Scene
+    property real radius: 20
+    property int backdropTier: GlassSurface.Ambient
     property bool dimBackdrop: false
-
-    Rectangle {
-        id: silhouette
-        anchors.fill: parent
-        radius: frame.radius
-        color: frame.colors.controlBase
-        visible: false
-    }
-
-    MultiEffect {
-        anchors.fill: parent
-        visible: GraphicsInfo.api !== GraphicsInfo.Software
-        source: silhouette
-        shadowEnabled: true
-        shadowBlur: 0.72
-        blurMax: 18
-        shadowVerticalOffset: 5
-        shadowColor: frame.colors.shadow
-    }
+    property bool menuSurface: false
 
     GlassSurface {
         objectName: "popupGlass"
@@ -36,6 +17,8 @@ Item {
         backdropTier: frame.backdropTier
         dimBackdrop: frame.dimBackdrop
         readingPanel: true
+        menuSurface: frame.menuSurface
+        material: GlassSurface.Panel
         readingPlate: true
         tint: frame.colors.controlBase
     }

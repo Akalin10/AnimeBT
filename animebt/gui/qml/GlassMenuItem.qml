@@ -5,7 +5,7 @@ MenuItem {
     id: entry
     required property GlassTheme colors
     required property GlassThemeManager optics
-    property int backdropTier: GlassSurface.Scene
+    property int backdropTier: GlassSurface.Ambient
     property bool dimBackdrop: false
     property bool selected: checked
     hoverEnabled: true
@@ -15,7 +15,9 @@ MenuItem {
     indicator: null
     arrow: null
 
-    contentItem: Text {
+    contentItem: ShadowText { theme: entry.colors;
+        baseStyle: entry.colors.liquidGlass ? Text.Outline : Text.Normal
+
         text: entry.text
         textFormat: Text.PlainText
         color: !entry.enabled ? entry.colors.muted : entry.selected ? entry.colors.accentText : entry.colors.ink
@@ -26,6 +28,9 @@ MenuItem {
     }
 
     background: GlassSurface {
+        visible: entry.selected || entry.highlighted || entry.hovered || entry.down || entry.visualFocus
+        menuSurface: true
+        material: GlassSurface.Control
         optics: entry.optics
         backdropTier: entry.backdropTier
         dimBackdrop: entry.dimBackdrop
@@ -37,7 +42,8 @@ MenuItem {
              : entry.down ? entry.colors.controlPressed
              : entry.highlighted || entry.hovered ? entry.colors.controlHover
              : entry.selected ? entry.colors.controlSelected : entry.colors.controlBase
-        focused: entry.visualFocus || entry.highlighted
+        focused: entry.visualFocus
+        outline: entry.visualFocus ? entry.colors.accent : "transparent"
         Glyph {
             visible: entry.selected
             anchors.right: parent.right

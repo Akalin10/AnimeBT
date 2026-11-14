@@ -15,7 +15,6 @@ Item {
     property bool hidePoster: false
     readonly property alias posterAnchor: detailPoster
     signal backRequested()
-    property bool highlightTitles: true
     property int motion: 160
     property bool loadingMotionAllowed: true
     readonly property int loadingMotion: loadingMotionAllowed ? motion : 0
@@ -56,6 +55,7 @@ Item {
     onSubjectIdChanged: showSources = false
     readonly property string queryToken: backend.listMode ? backend.keyword : String(subjectId)
     onQueryTokenChanged: {
+        seasonFilter = ""
         episodeFilter = ""
         resolutionFilter = ""
         fansubFilter = ""
@@ -71,6 +71,7 @@ Item {
             list.positionViewAtBeginning()
     }
     property string episodeFilter: ""
+    property string seasonFilter: ""
     property string resolutionFilter: ""
     property string fansubFilter: ""
     property string categoryFilter: ""
@@ -81,7 +82,7 @@ Item {
     property string copiedKey: ""
     readonly property QtObject actions: backend.actions
     readonly property bool actionPopupOpen: resourceMenu.opened || saveDialog.visible
-        || category.popupOpen || episode.popupOpen || resolution.popupOpen || fansub.popupOpen
+        || category.popupOpen || season.popupOpen || episode.popupOpen || resolution.popupOpen || fansub.popupOpen
 
     Connections {
         target: page.actions
@@ -103,6 +104,7 @@ Item {
 
     function applyFilters() {
         backend.resourceModel.setFilters(categoryFilter, episodeFilter, resolutionFilter, fansubFilter)
+        backend.resourceModel.setSeasonFilter(seasonFilter)
     }
     function changeFilter() {
         applyFilters()
@@ -112,6 +114,7 @@ Item {
         }
     }
     onCategoryFilterChanged: changeFilter()
+    onSeasonFilterChanged: changeFilter()
     onEpisodeFilterChanged: changeFilter()
     onResolutionFilterChanged: changeFilter()
     onFansubFilterChanged: changeFilter()
@@ -205,7 +208,9 @@ Item {
         columnSpacing: 5
         rowSpacing: 3
 
-        Text {
+        ShadowText { theme: colors;
+            baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
             text: field.label
             color: colors.muted
             font.pixelSize: colors.detailTextSize
@@ -249,6 +254,8 @@ Item {
             Item {
                 id: workInfoPanel
                 Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                Layout.minimumHeight: 0
                 implicitHeight: page.backend.listMode ? page.loadingHeight : workInfo.implicitHeight + 20
                 Layout.bottomMargin: page.backend.listMode ? 7 * page.loadingHeight / 68 : 7
 
@@ -319,7 +326,9 @@ Item {
                                 onClicked: page.backend.refresh()
                             }
                         }
-                        Text {
+                        ShadowText { theme: colors;
+                            baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                             Layout.fillWidth: true
                             visible: !page.backend.listMode
                             text: page.backend.subject.title || ""
@@ -334,7 +343,9 @@ Item {
                             visible: original.visible || airtime.visible
                             implicitHeight: Math.max(original.visible ? original.implicitHeight : 0,
                                                      airtime.visible ? airtime.implicitHeight : 0)
-                            Text {
+                            ShadowText { theme: colors;
+                                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                                 id: original
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: visible ? Math.min(implicitWidth, Math.max(0, parent.width
@@ -346,7 +357,9 @@ Item {
                                 color: colors.muted
                                 font: colors.originalFont(text, 14)
                             }
-                            Text {
+                            ShadowText { theme: colors;
+                                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                                 id: airtime
                                 anchors.verticalCenter: parent.verticalCenter
                                 x: original.visible ? original.width + 8 : 0
@@ -406,6 +419,7 @@ Item {
                     contentWidth: availableWidth
                     clip: true
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical: GlassScrollBar { colors: page.colors }
                     GridLayout {
                         id: sourceGrid
                         width: sourceScroll.availableWidth
@@ -428,7 +442,9 @@ Item {
                                     anchors.leftMargin: 7
                                     anchors.rightMargin: 7
                                     spacing: 2
-                                    Text {
+                                    ShadowText { theme: colors;
+                                        baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                                         width: parent.width
                                         text: source.modelData.name
                                         textFormat: Text.PlainText
@@ -437,7 +453,9 @@ Item {
                                         font.pixelSize: colors.detailTextSize
                                         font.weight: Font.DemiBold
                                     }
-                                    Text {
+                                    ShadowText { theme: colors;
+                                        baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                                         width: parent.width
                                         text: source.modelData.status === "搜索中" ? "搜索中"
                                             : source.modelData.status + " · " + source.modelData.count + " 条"
@@ -465,7 +483,9 @@ Item {
                 }
             }
 
-            Text {
+            ShadowText { theme: colors;
+                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                 Layout.fillWidth: true
                 Layout.bottomMargin: 7
                 visible: !page.backend.loading && page.backend.subject.platform === "TV" && !page.backend.scheduleAvailable
@@ -477,7 +497,7 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
-                columns: page.backend.listMode ? (page.width < 900 ? 3 : 5) : 4
+                columns: page.width < 900 ? 3 : (page.backend.listMode ? 6 : 5)
                 columnSpacing: 6
                 rowSpacing: 6
                 ResourceFilter {
@@ -486,6 +506,13 @@ Item {
                     choices: page.categoryOptions
                     selectedValue: page.categoryFilter
                     onPicked: value => page.categoryFilter = value
+                }
+                ResourceFilter {
+                    id: season
+                    label: "季度"
+                    choices: page.options("season", page.seasonFilter)
+                    selectedValue: page.seasonFilter
+                    onPicked: value => page.seasonFilter = value
                 }
                 ResourceFilter {
                     id: episode
@@ -550,7 +577,8 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             model: page.backend.resourceModel
             reuseItems: true
-            ScrollBar.vertical: ScrollBar {
+            ScrollBar.vertical: GlassScrollBar {
+                colors: page.colors
                 objectName: "resourceScrollBar"
                 policy: ScrollBar.AsNeeded
             }
@@ -561,8 +589,7 @@ Item {
                 readonly property var modelData: resource
                 readonly property var spans: modelData.titleSpans || []
                 readonly property bool inViewport: y + height > list.contentY && y < list.contentY + list.height
-                readonly property bool needsAssistant: page.highlightTitles && page.assistant.ready
-                    && inViewport && modelData.titleAmbiguous === true
+                readonly property bool needsAssistant: page.assistant.ready && inViewport
                 function requestAnnotation() {
                     if (needsAssistant)
                         page.assistant.request(modelData.title, modelData.titleSpans || [])
@@ -579,13 +606,17 @@ Item {
                 HoverHandler { id: rowHover }
                 GlassSurface {
                     objectName: "resourceCardGlass"
+                    // Semantic title colors keep their original contrast-safe cap.
+                    readingPanel: page.assistant.enabled
                     anchors.fill: parent
                     optics: page.optics
                     compact: true
                     readingPlate: true
                     renderOptics: entry.inViewport
-                    radius: 12
-                    tint: page.assistant.background(colors.dark, rowHover.hovered)
+                    radius: 16
+                    tint: colors.plainDark ? (rowHover.hovered ? colors.panelHover : colors.panel)
+                          : page.assistant.background(colors.dark, rowHover.hovered)
+                    outline: colors.plainDark && rowHover.hovered ? colors.hoverLine : "transparent"
                 }
 
                 MouseArea {
@@ -636,22 +667,18 @@ Item {
                         focused: thumbnail.visualFocus || thumbnail.hovered
                     }
                     contentItem: Item {
-                        Image {
+                        RoundedCover {
                             id: miniature
                             anchors.fill: parent
                             anchors.margins: 2
                             source: page.coverSource
-                            sourceSize.width: 96
-                            fillMode: Image.PreserveAspectCrop
-                            clip: true
-                            asynchronous: true
-                            cache: true
+                            sourceSize.width: Math.max(96, Math.ceil(width * Screen.devicePixelRatio))
+                            radius: 8
                         }
                         Rectangle {
                             anchors.fill: parent
                             radius: 8
-                            color: thumbnail.copied ? colors.successFill
-                                 : miniature.status === Image.Ready ? "#cf1c263b" : "transparent"
+                            color: "transparent"
                             Behavior on opacity { NumberAnimation { duration: page.motion } }
                             Glyph {
                                 anchors.centerIn: parent
@@ -685,19 +712,25 @@ Item {
                     x: thumbnail.x + thumbnail.width + 11
                     y: Math.max(10, (parent.height - height) / 2)
                     spacing: 7
-                    Text {
+                    ShadowText { theme: colors;
+                        baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                         objectName: "resourceTitle"
                         width: parent.width
-                        text: page.highlightTitles
-                            ? page.assistant.render(entry.modelData.title, entry.spans, colors.dark, page.assistant.revision)
-                            : entry.modelData.title
-                        textFormat: page.highlightTitles ? Text.RichText : Text.PlainText
+                        // Keep a single sanitized format even while toggling AI:
+                        // switching text and textFormat independently can briefly
+                        // interpret an unescaped original as HTML.
+                        text: page.assistant.render(entry.modelData.title, entry.spans, colors.dark, page.assistant.revision)
+                        textFormat: Text.RichText
                         Accessible.name: entry.modelData.title
                         wrapMode: Text.Wrap
                         lineHeight: 1.22
                         color: colors.ink
-                        font.pixelSize: page.width < 720 ? 16 : 17
-                        font.weight: Font.Medium
+                        font: {
+                            const titleFont = colors.originalFont(page.assistant.originalTitle(entry.modelData.title), page.width < 720 ? 16 : 17)
+                            titleFont.weight = Font.Medium
+                            return titleFont
+                        }
                     }
                     Flow {
                         width: parent.width
@@ -714,7 +747,9 @@ Item {
                                 entry.modelData.date,
                                 "来源 " + entry.modelData.sources
                             ]
-                            Text {
+                            ShadowText { theme: colors;
+                                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                                 required property string modelData
                                 visible: modelData.length > 0
                                 width: Math.min(implicitWidth, parent.width)
@@ -728,7 +763,9 @@ Item {
                     }
                 }
             }
-            Text {
+            ShadowText { theme: colors;
+                baseStyle: colors.liquidGlass ? Text.Outline : Text.Normal
+
                 anchors.centerIn: parent
                 visible: !page.backend.loading && list.count === 0
                 text: page.facets.total > 0 ? "没有符合当前筛选条件的资源。" : page.backend.emptyMessage

@@ -70,5 +70,10 @@ def resource_rows(resources, matcher=None):
             "category": category,
             "work_ids": work_ids,
             "works": [matcher.works[entry_id]["title"] for entry_id in work_ids],
+            # Filter metadata comes only from works already confirmed by the
+            # attribution engine. It never feeds back into matching/deduplication.
+            "verifiedSeasons": sorted(set().union(*(
+                matcher.seasons.get(entry_id, set()) for entry_id in work_ids
+            ))) if matcher and work_ids else [],
         })
     return rows

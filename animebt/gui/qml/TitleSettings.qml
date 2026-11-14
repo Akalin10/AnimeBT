@@ -2,22 +2,25 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-Dialog {
+Popup {
     id: dialog
     objectName: "titleSettingsDialog"
     required property QtObject assistant
     required property GlassTheme colors
     required property GlassThemeManager optics
-    title: "AI 智能整理"
-    palette.windowText: colors.ink
-    palette.text: colors.ink
-    palette.buttonText: colors.ink
     modal: true
+    focus: true
     popupType: Popup.Item
     Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, dialog.optics.modalDim) }
-    width: Math.min(parent.width - 40, 490)
-    height: Math.min(implicitHeight, parent.height - 32)
-    padding: 18
+    implicitWidth: 520
+    implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
+    width: Math.max(0, Math.min(parent.width - 32, implicitWidth))
+    height: Math.max(0, Math.min(implicitHeight, parent.height - 32))
+    topInset: 0
+    bottomInset: 0
+    leftInset: 0
+    rightInset: 0
+    padding: 20
     closePolicy: endpoint.editingMenuOpen || model.editingMenuOpen || key.editingMenuOpen
         ? Popup.NoAutoClose : Popup.CloseOnEscape
 
@@ -31,121 +34,151 @@ Dialog {
     onClosed: key.clear()
 
     background: GlassPopupFrame {
+        objectName: "aiSettingsBackground"
         colors: dialog.colors
         optics: dialog.optics
-        radius: 18
+        radius: 22
+        menuSurface: true
         dimBackdrop: true
     }
-    header: Label {
-        text: dialog.title
-        padding: 18
-        bottomPadding: 0
-        color: dialog.colors.ink
-        font.pixelSize: 20
-        font.weight: Font.DemiBold
-    }
-    contentItem: ScrollView {
-        id: settingsScroll
-        implicitHeight: settingsForm.implicitHeight
-        contentWidth: availableWidth
+
+    contentItem: ColumnLayout {
         clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ColumnLayout {
-            id: settingsForm
-            width: settingsScroll.availableWidth
-            spacing: 6
-            Switch {
-                id: enabledSwitch
-                objectName: "enableAi"
-                text: "启用 AI 智能整理"
-            }
-            Label { text: "Base URL"; color: dialog.colors.ink }
-            GlassTextField {
-                id: endpoint
-                colors: dialog.colors
-                optics: dialog.optics
-                inModalPanel: true
-                objectName: "aiBaseUrl"
-                Layout.fillWidth: true
-                placeholderText: "https://example.com/v1"
-                Accessible.name: "Base URL"
-            }
-            Label { text: "模型名称"; color: dialog.colors.ink }
-            GlassTextField {
-                id: model
-                colors: dialog.colors
-                optics: dialog.optics
-                inModalPanel: true
-                objectName: "aiModel"
-                Layout.fillWidth: true
-                Accessible.name: "模型名称"
-            }
-            Label { text: "API Key"; color: dialog.colors.ink }
-            GlassTextField {
-                id: key
-                colors: dialog.colors
-                optics: dialog.optics
-                inModalPanel: true
-                objectName: "aiApiKey"
-                Layout.fillWidth: true
-                echoMode: TextInput.Password
-                inputMethodHints: Qt.ImhHiddenText | Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
-                placeholderText: dialog.assistant.hasKey ? "已安全保存，留空沿用原 Key" : "可留空用于无需认证的服务"
-                Accessible.name: "API Key"
-                enabled: !removeKey.checked
-            }
-            CheckBox {
-                id: removeKey
-                visible: dialog.assistant.hasKey
-                text: "清除已保存的 Key"
-                onToggled: if (checked) key.clear()
-            }
-            Label {
-                Layout.fillWidth: true
-                text: "启用后，部分可见的疑难标题会发送到所填服务。更换服务地址时，请重新填写 Key。"
-                wrapMode: Text.Wrap
-                color: dialog.colors.muted
-            }
-            Label {
-                objectName: "aiSettingsStatus"
-                Layout.fillWidth: true
-                text: dialog.assistant.status
-                wrapMode: Text.Wrap
-                color: dialog.colors.accentText
-                visible: text.length > 0
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                GlassButton {
+        spacing: 14
+        ShadowLabel { theme: dialog.colors;
+            text: "AI 智能整理"
+            color: dialog.colors.ink
+            font.pixelSize: 22
+            font.weight: Font.DemiBold
+        }
+        ScrollView {
+            id: settingsScroll
+            objectName: "aiSettingsScroll"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: 0
+            Layout.preferredHeight: settingsForm.implicitHeight
+            implicitHeight: settingsForm.implicitHeight
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: GlassScrollBar { colors: dialog.colors }
+            ColumnLayout {
+                id: settingsForm
+                objectName: "aiSettingsForm"
+                width: settingsScroll.availableWidth
+                spacing: 8
+                GlassSwitch {
                     colors: dialog.colors
                     optics: dialog.optics
-                    backdropTier: GlassSurface.Scene
-                    dimBackdrop: true
-                    objectName: "testAiConnection"
-                    text: "测试连接"
-                    enabled: !dialog.assistant.testing
-                    onClicked: dialog.assistant.testConnection(endpoint.text, model.text, key.text, removeKey.checked)
+                    id: enabledSwitch
+                    objectName: "enableAi"
+                    text: "启用 AI 智能整理"
+                    onToggled: dialog.assistant.setEnabled(checked)
                 }
-                Item { Layout.fillWidth: true }
-                GlassButton {
-                    colors: dialog.colors
-                    optics: dialog.optics
-                    backdropTier: GlassSurface.Scene
-                    dimBackdrop: true
-                    text: "取消"
-                    onClicked: dialog.close()
+                ShadowLabel { theme: dialog.colors;
+                    Layout.fillWidth: true
+                    text: "只发送可见资源的原始标题，返回字段须通过原文校验。关闭后显示无着色的原标题。"
+                    wrapMode: Text.Wrap
+                    color: dialog.colors.muted
+                    font.pixelSize: dialog.colors.smallTextSize
                 }
-                GlassButton {
+                ShadowLabel { theme: dialog.colors;
+                    text: "Base URL"
+                    color: dialog.colors.ink
+                }
+                GlassTextField {
+                    id: endpoint
                     colors: dialog.colors
                     optics: dialog.optics
-                    backdropTier: GlassSurface.Scene
-                    dimBackdrop: true
-                    objectName: "saveAiSettings"
-                    text: "保存"
-                    onClicked: {
-                        if (dialog.assistant.save(enabledSwitch.checked, endpoint.text, model.text, key.text, removeKey.checked))
-                            dialog.close()
-                    }
+                    inModalPanel: true
+                    objectName: "aiBaseUrl"
+                    Layout.fillWidth: true
+                    placeholderText: "https://api.deepseek.com 或兼容服务地址"
+                    Accessible.name: "Base URL"
+                }
+                ShadowLabel { theme: dialog.colors;
+                    text: "模型名称"
+                    color: dialog.colors.ink
+                }
+                GlassTextField {
+                    id: model
+                    colors: dialog.colors
+                    optics: dialog.optics
+                    inModalPanel: true
+                    objectName: "aiModel"
+                    Layout.fillWidth: true
+                    Accessible.name: "模型名称"
+                }
+                ShadowLabel { theme: dialog.colors;
+                    text: "API Key"
+                    color: dialog.colors.ink
+                }
+                GlassTextField {
+                    id: key
+                    colors: dialog.colors
+                    optics: dialog.optics
+                    inModalPanel: true
+                    objectName: "aiApiKey"
+                    Layout.fillWidth: true
+                    echoMode: TextInput.Password
+                    inputMethodHints: Qt.ImhHiddenText | Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                    placeholderText: dialog.assistant.hasKey ? "已安全保存，留空沿用原 Key" : "输入服务的 API Key"
+                    Accessible.name: "API Key"
+                    enabled: !removeKey.checked
+                }
+                GlassCheckBox {
+                    colors: dialog.colors
+                    optics: dialog.optics
+                    id: removeKey
+                    visible: dialog.assistant.hasKey
+                    text: "清除已保存的 Key"
+                    onToggled: if (checked) key.clear()
+                }
+                ShadowLabel { theme: dialog.colors;
+                    objectName: "aiSettingsStatus"
+                    Layout.fillWidth: true
+                    text: dialog.assistant.status
+                    wrapMode: Text.Wrap
+                    color: dialog.assistant.statusError ? dialog.colors.danger : dialog.colors.accentText
+                    visible: text.length > 0
+                    font.pixelSize: dialog.colors.detailTextSize
+                }
+            }
+        }
+        RowLayout {
+            objectName: "aiSettingsButtons"
+            Layout.fillWidth: true
+            GlassButton {
+                colors: dialog.colors
+                optics: dialog.optics
+                backdropTier: GlassSurface.Dialog
+                dimBackdrop: true
+                objectName: "testAiConnection"
+                text: dialog.assistant.testing ? "测试中…" : "测试连接"
+                enabled: !dialog.assistant.testing
+                onClicked: dialog.assistant.testConnection(endpoint.text, model.text, key.text, removeKey.checked)
+            }
+            Item { Layout.fillWidth: true }
+            GlassButton {
+                colors: dialog.colors
+                optics: dialog.optics
+                backdropTier: GlassSurface.Dialog
+                dimBackdrop: true
+                text: "取消"
+                onClicked: dialog.close()
+            }
+            GlassButton {
+                colors: dialog.colors
+                optics: dialog.optics
+                backdropTier: GlassSurface.Dialog
+                dimBackdrop: true
+                objectName: "saveAiSettings"
+                text: "保存"
+                enabled: !dialog.assistant.testing
+                onClicked: {
+                    if (dialog.assistant.save(enabledSwitch.checked, endpoint.text, model.text, key.text, removeKey.checked))
+                        dialog.close()
                 }
             }
         }

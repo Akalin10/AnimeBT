@@ -8,7 +8,9 @@ import sys
 from tempfile import TemporaryDirectory
 from threading import Thread
 from time import monotonic
+from time import sleep
 import unittest
+from unittest.mock import patch
 
 from animebt.gui.title_spans import (
     BACKGROUNDS, INKS, parse_display_title, rich_title, validate_suggestions,
@@ -118,6 +120,14 @@ class TitleAssistantTest(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
+            def do_GET(self):
+                requests.append((self.path, self.headers.get("Authorization"), {}))
+                body = b'{"data":[{"id":"model"}]}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_POST(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 counts[payload["model"]] += 1
@@ -125,22 +135,34 @@ class TitleAssistantTest(unittest.TestCase):
                 if payload["model"] == "offline":
                     self.send_error(503)
                     return
-                if len(payload["messages"]) == 1:
-                    data = {"ok": True}
-                else:
-                    titles = json.loads(payload["messages"][-1]["content"])
-                    data = {"items": []}
-                    for row in titles:
-                        start = row["title"].index("07")
-                        data["items"].append({"id": row["id"], "spans": [
-                            {"kind": "episode", "start": start, "end": start + 2, "text": "07"},
-                            {"kind": "resolution", "start": start, "end": start + 2, "text": "07"},
-                        ]})
+                if payload["model"].startswith("http-"):
+                    self.send_error(int(payload["model"].split("-")[1]))
+                    return
+                if payload["model"] == "slow":
+                    sleep(0.25)
+                titles = json.loads(payload["messages"][-1]["content"])
+                data = {"items": []}
+                for row in titles:
+                    title = row["title"]
+                    name = "Example Anime" if "Example" in title else "碧蓝之海"
+                    fields = []
+                    for kind, snippet in (("anime", name), ("episode", "01" if "Example" in title else "07"),
+                                          ("resolution", "1080p" if "1080p" in title else "720p")):
+                        start = title.index(snippet)
+                        fields.append({"kind": kind, "start": start, "end": start + len(snippet), "text": snippet})
+                    data["items"].append({"id": row["id"], "fields": fields})
+                if payload["model"] == "invalid-fields":
+                    data = {"items": [{"id": 0, "fields": [{"kind": "anime", "start": 0, "end": 5, "text": "Invented"}]}]}
                 body = json.dumps({"choices": [{"message": {"content": json.dumps(data)}}]}).encode()
+                if payload["model"] == "bad-json":
+                    body = b'{"choices":[{"message":{"content":"not JSON"}}]}'
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.wfile.write(body)
+                except (ConnectionError, OSError):
+                    pass  # Expected when timeout/cancellation closes the socket.
 
         with TemporaryDirectory() as tmp, ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
@@ -163,7 +185,7 @@ class TitleAssistantTest(unittest.TestCase):
                 assistant.request(title, spans)
                 assistant.request(title, spans)
                 assistant.request(second, second_spans)
-                self.wait_for(lambda: ">07</span>" in assistant.render(title, spans, True, assistant.revision))
+                self.wait_for(lambda: ">[07]</span>" in assistant.render(title, spans, True, assistant.revision))
                 self.assertEqual(counts["model"], 2)  # connection test plus one batch
                 self.assertEqual(requests[1][0:2], ("/v1/chat/completions", "Bearer " + secret))
                 self.assertEqual(len(json.loads(requests[1][2]["messages"][-1]["content"])), 2)
@@ -173,14 +195,56 @@ class TitleAssistantTest(unittest.TestCase):
                 self.assertEqual(assistant.revision, revision)
                 reopened = TitleAssistant(settings, cache)
                 try:
-                    reopened.request(title, spans)
-                    self.assertIn(">07</span>", reopened.render(title, spans, False, reopened.revision))
+                    reopened.request(title, [])
+                    self.assertIn(">[07]</span>", reopened.render(title, spans, False, reopened.revision))
+                    self.assertEqual(counts["model"], 2)
+                    reopened.setEnabled(False)
+                    self.assertEqual(reopened.render(title, spans, False, reopened.revision), title)
+                    reopened.request(second, [])
+                    self.assertFalse(reopened._pending)
+                    reopened.setEnabled(True)
+                    reopened.request(title, [])
+                    self.assertIn(">[07]</span>", reopened.render(title, spans, True, reopened.revision))
                     self.assertEqual(counts["model"], 2)
                     self.assertTrue(reopened.save(True, base, "offline", "", False))
                     reopened.request(title, spans)
                     self.wait_for(lambda: "HTTP 503" in reopened.status)
-                    self.assertNotIn(">07</span>", reopened.render(title, spans, True, reopened.revision))
+                    self.assertEqual(title, reopened.render(title, spans, True, reopened.revision))
                     self.assertEqual(counts["offline"], 1)
+                    for code, reason in ((401, "Key"), (402, "余额"), (404, "路径"), (429, "限流"), (500, "服务端")):
+                        reopened.testConnection(base, f"http-{code}", "", False)
+                        self.wait_for(lambda: not reopened.testing)
+                        self.assertTrue(reopened.statusError)
+                        self.assertIn(reason, reopened.status)
+                    for model, reason in (("bad-json", "JSON"), ("invalid-fields", "原文校验")):
+                        reopened.testConnection(base, model, "", False)
+                        self.wait_for(lambda: not reopened.testing)
+                        self.assertTrue(reopened.statusError)
+                        self.assertIn(reason, reopened.status)
+                    with patch("animebt.gui.title_assistant.is_deepseek", return_value=True):
+                        reopened.testConnection(base, "does-not-exist", "", False)
+                        self.wait_for(lambda: not reopened.testing)
+                        self.assertIn("可用模型：model", reopened.status)
+                        reopened.testConnection(base, "model", "", False)
+                        self.wait_for(lambda: not reopened.testing)
+                        self.assertFalse(reopened.statusError)
+                        self.assertIn("连接成功", reopened.status)
+                        self.assertTrue(any(request[0] == "/v1/models" for request in requests))
+                    with patch("animebt.gui.title_assistant.REQUEST_TIMEOUT_MS", 80):
+                        reopened.testConnection(base, "slow", "", False)
+                        self.wait_for(lambda: not reopened.testing)
+                        self.assertIn("超时", reopened.status)
+                    reopened.save(True, base, "slow", "", False)
+                    reopened.request(title, [])
+                    self.wait_for(lambda: reopened._reply is not None)
+                    reopened.setEnabled(False)
+                    self.wait_for(lambda: reopened._reply is None)
+                    self.assertEqual(reopened.render(title, [], True, reopened.revision), title)
+                    self.assertFalse(reopened._inflight)
+                    self.assertFalse(reopened._pending)
+                    restored = TitleAssistant(settings, Path(tmp) / "other.db")
+                    self.assertFalse(restored.enabled)
+                    restored.shutdown()
                 finally:
                     reopened.shutdown()
             finally:

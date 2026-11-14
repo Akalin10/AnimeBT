@@ -68,9 +68,21 @@ class ResourceFilterModel(QSortFilterProxyModel):
     def __init__(self, source, parent):
         super().__init__(parent)
         self._filters = ()
+        self._season_filter = ""
         self._sort_field = None
         self._descending = False
         self.setSourceModel(source)
+
+    @Slot(str)
+    def setSeasonFilter(self, season):
+        if self._season_filter != season:
+            if hasattr(self, "endFilterChange"):
+                self.beginFilterChange()
+                self._season_filter = season
+                self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+            else:
+                self._season_filter = season
+                self.invalidateFilter()
 
     @Slot(str)
     def setSortOrder(self, order):
@@ -109,4 +121,5 @@ class ResourceFilterModel(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row, source_parent):
         row = self.sourceModel().rows[source_row]
-        return all(row[field] == value for field, value in self._filters)
+        return (not self._season_filter or self._season_filter in row.get("seasons", ["未知"])) and all(
+            row[field] == value for field, value in self._filters)
