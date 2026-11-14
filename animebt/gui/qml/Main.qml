@@ -31,6 +31,16 @@ Window {
     readonly property int navigationDuration: animate ? 330 : 0
     property bool startupMotionAllowed: false
     property bool startupActive: false
+    property bool startupNoticeAllowed: true
+    property bool startupFirstFrame: false
+    property bool startupNoticeShown: false
+    function maybeShowStartupNotice() {
+        if (startupNoticeAllowed && startupFirstFrame && !startupActive && !startupNoticeShown && !appearance.hideStartupSearchNotice) {
+            startupNoticeShown = true
+            startupSearchNotice.open()
+        }
+    }
+    onStartupActiveChanged: if (!startupActive) Qt.callLater(window.maybeShowStartupNotice)
     required property QtObject catalog
     required property QtObject resourceSearch
     required property QtObject titleAssistant
@@ -58,6 +68,7 @@ Window {
         property bool liquidGlass: true
         property bool animations: true
         property bool startupAnimation: true
+        property bool hideStartupSearchNotice: false
         property int posterSizeStep: 2
         property string searchMode: "poster"
         property real glassFrostLight: 0
@@ -190,7 +201,7 @@ Window {
         id: themeColors
         wallpaperTextShadow: wallpaperLayer.active
         liquidGlass: appearance.liquidGlass
-        dark: appearance.darkMode
+        dark: appearance.liquidGlass || appearance.darkMode
         typography: window.typography
     }
     palette.window: themeColors.popup
@@ -1122,8 +1133,11 @@ Window {
                         optics: glassOptics
                         objectName: "darkModeSwitch"
                         text: "深色模式"
-                        checked: appearance.darkMode
+                        visible: !appearance.liquidGlass
+                        enabled: !appearance.liquidGlass
+                        checked: themeColors.dark
                         onToggled: {
+                            if (appearance.liquidGlass) return
                             appearance.darkMode = checked
                             appearance.setValue("darkMode", checked)
                             appearance.sync()
@@ -1154,6 +1168,8 @@ Window {
                         }
                     }
                     Column {
+                        objectName: "glassFrostSettings"
+                        visible: appearance.liquidGlass
                         enabled: appearance.liquidGlass
                         width: parent.width
                         spacing: 5
@@ -1186,12 +1202,14 @@ Window {
                         }
                         RowLayout {
                             width: parent.width
-                            ShadowText { theme: themeColors; text: "Clear 清透"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                            ShadowText { theme: themeColors; text: "Clear"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
                             Item { Layout.fillWidth: true }
-                            ShadowText { theme: themeColors; text: "Tinted 磨砂"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                            ShadowText { theme: themeColors; text: "Tinted"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
                         }
                     }
                     RowLayout {
+                        objectName: "posterSizeSettings"
+                        visible: appearance.liquidGlass
                         width: parent.width
                         spacing: 12
                         ShadowText { theme: themeColors;
@@ -1269,6 +1287,8 @@ Window {
                         }
                     }
                     Column {
+                        objectName: "wallpaperSettings"
+                        visible: appearance.liquidGlass
                         width: parent.width
                         spacing: 8
                         enabled: appearance.liquidGlass
@@ -1339,7 +1359,7 @@ Window {
                                 width: parent.width
                                 ShadowText { theme: themeColors; text: "较暗"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
                                 Item { Layout.fillWidth: true }
-                                ShadowText { theme: themeColors; text: "原图"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
+                                ShadowText { theme: themeColors; text: "较亮"; color: window.muted; font.pixelSize: themeColors.smallTextSize }
                             }
                         }
                         ShadowText { theme: themeColors;
@@ -1363,6 +1383,18 @@ Window {
                         }
                     }
                 }
+            }
+        }
+
+        StartupNotice {
+            id: startupSearchNotice
+            colors: themeColors
+            optics: glassOptics
+            onAcknowledged: doNotShowAgain => {
+                appearance.hideStartupSearchNotice = doNotShowAgain
+                appearance.setValue("hideStartupSearchNotice", doNotShowAgain)
+                appearance.sync()
+                searchField.forceActiveFocus()
             }
         }
 
@@ -1422,9 +1454,18 @@ Window {
         }
     }
 
+    Connections {
+        target: window
+        enabled: !window.startupFirstFrame
+        function onFrameSwapped() {
+            window.startupFirstFrame = true
+            Qt.callLater(window.maybeShowStartupNotice)
+        }
+    }
+
     Shortcut {
         sequence: "Ctrl+F"
-        enabled: !window.startupActive && (window.listMode || !window.resourceSearch.active)
+        enabled: !window.startupActive && !startupSearchNotice.visible && (window.listMode || !window.resourceSearch.active)
         onActivated: {
             if (window.scrollCatalogHeader) {
                 page.cancelFlick()
@@ -1437,13 +1478,13 @@ Window {
         sequence: "Esc"
         enabled: (window.listMode ? window.resourceSearch.loading
                  : !window.resourceSearch.active && (window.catalog.status === "loading" || window.resourceSearch.catalogChecking))
-                 && !settingsPopup.opened && !assistantSettings.opened && !searchField.editingMenuOpen
+                 && !startupSearchNotice.visible && !settingsPopup.opened && !assistantSettings.opened && !searchField.editingMenuOpen
         onActivated: window.cancelSearch()
     }
     Shortcut {
         sequence: "Esc"
         enabled: window.resourceSearch.active && !(window.listMode && window.resourceSearch.loading)
-                 && !settingsPopup.opened && !assistantSettings.opened
+                 && !startupSearchNotice.visible && !settingsPopup.opened && !assistantSettings.opened
                  && (!resourceLoader.item || !resourceLoader.item.actionPopupOpen)
         onActivated: window.returnToCatalog()
     }

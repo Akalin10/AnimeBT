@@ -12,18 +12,16 @@ try {
     $app = Join-Path (Get-Location) 'dist\AnimeBT'
     Copy-Item -LiteralPath README.md,CHANGELOG.md,packaging\THIRD_PARTY.md -Destination $app
     $docs = Join-Path $app 'docs'
-    $assets = Join-Path $app 'animebt\gui\assets'
-    $packageDocs = Join-Path $app 'packaging'
-    New-Item -ItemType Directory -Path $docs,$assets,$packageDocs -Force | Out-Null
-    Copy-Item -LiteralPath docs\guide.md,docs\search-audit.md -Destination $docs
-    Copy-Item -LiteralPath animebt\gui\assets\icon.png -Destination $assets
+    New-Item -ItemType Directory -Path $docs -Force | Out-Null
+    Copy-Item -LiteralPath docs\guide.md -Destination $docs
     Copy-Item -LiteralPath docs\showcase -Destination $docs -Recurse
-    Copy-Item -LiteralPath packaging\THIRD_PARTY.md -Destination $packageDocs
+    $readmePath = Join-Path $app 'README.md'
+    $readme = [System.IO.File]::ReadAllText($readmePath).Replace('animebt/gui/assets/icon.png', '_internal/animebt/gui/assets/icon.png').Replace('packaging/THIRD_PARTY.md', 'THIRD_PARTY.md')
+    [System.IO.File]::WriteAllText($readmePath, $readme, [System.Text.UTF8Encoding]::new($false))
     & $buildPython tools/collect_notices.py $app
     if ($LASTEXITCODE -ne 0) { throw "License notice collection failed" }
     $releaseVersion = (& $buildPython -c 'from animebt.version import __version__; print(__version__)').Trim()
     $zip = "dist\AnimeBT-$releaseVersion-Windows-x64.zip"
     Compress-Archive -LiteralPath $app -DestinationPath $zip -Force
-    $digest = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-    "$digest  $(Split-Path -Leaf $zip)" | Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
+    Write-Host "Created $zip"
 } finally { Pop-Location }

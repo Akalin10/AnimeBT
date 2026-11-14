@@ -22,7 +22,7 @@ MenuItem {
         textFormat: Text.PlainText
         color: !entry.enabled ? entry.colors.muted : entry.selected ? entry.colors.accentText : entry.colors.ink
         font.pixelSize: entry.colors.textSize
-        font.weight: entry.selected ? Font.DemiBold : Font.Normal
+        font.weight: entry.selected ? Font.Bold : Font.DemiBold
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }

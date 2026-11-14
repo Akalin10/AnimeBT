@@ -11,6 +11,7 @@ LATIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 CHINESE = "动画搜索进击资源播放标题集数"
 TRADITIONAL = "動畫搜尋進擊資源播放標題集數"
 JAPANESE = "進撃の巨人テスト映画情報峠辻働"
+UNIFIED_FAMILIES = ("MaoKenTangYuan (beta)", "猫啃网糖圆体", "猫啃糖圆体")
 KANA = re.compile(r"[\u3041-\u3096\u30a1-\u30fa]")
 
 
@@ -22,6 +23,8 @@ class SystemTypography(QObject):
 
     @Slot(str, int, result=QFont)
     def readableFont(self, title, pixels):
+        if self.normal.family() in UNIFIED_FAMILIES:
+            return self.originalFont(title, pixels)
         font = QFont(self.normal)
         font.setStyleName("")  # Do not pin the inherited Regular face when QML requests Bold.
         installed = set(QFontDatabase.families())
@@ -100,9 +103,18 @@ def _matched_pair(chinese, japanese):
 def apply_system_typography(app):
     QQuickWindow.setTextRenderType(QQuickWindow.TextRenderType.QtTextRendering)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
-    font.setWeight(QFont.Weight.Normal)
+    font.setWeight(QFont.Weight.Medium)
     font.setPixelSize(14)
-    font.setStyleHint(QFont.StyleHint.SansSerif, QFont.StyleStrategy.PreferDefault)
+    font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
+    font.setStyleHint(QFont.StyleHint.SansSerif, QFont.StyleStrategy.PreferAntialias)
+    installed = {family.casefold(): family for family in QFontDatabase.families()}
+    unified = _preferred(installed, UNIFIED_FAMILIES, CHINESE + LATIN)
+    if unified:
+        fallback = [installed.get(name.casefold(), "") for name in ("Microsoft YaHei UI", "Yu Gothic UI", "Segoe UI")]
+        font.setFamilies(list(dict.fromkeys(filter(None, (unified, *fallback, font.family())))))
+        font.setStyleName("")
+        app.setFont(font)
+        return SystemTypography(font, QFont(font), app)
     base = _sample(font)
     if not base.isValid():
         app.setFont(font)

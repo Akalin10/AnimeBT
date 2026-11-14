@@ -20,13 +20,11 @@ openssl_binaries = [
     (name, str(next(folder / name for folder in runtime_dirs if (folder / name).is_file())), 'BINARY')
     for name in sorted(openssl)
 ]
-runtime_ca_policy = runtime / 'Lib' / 'codex-rejected-cas.pem'
-runtime_data = [(str(runtime_ca_policy), '.')] if runtime_ca_policy.is_file() else []
 
 analysis = Analysis(
     ['packaging/entrypoint.py'],
     pathex=[SPECPATH],
-    datas=collect_data_files('opencc') + runtime_data + [
+    datas=collect_data_files('opencc') + [
         ('animebt/gui/qml/*.qml', 'animebt/gui/qml'),
         ('animebt/gui/qml/shaders/*.qsb', 'animebt/gui/qml/shaders'),
         ('animebt/gui/assets/icon.png', 'animebt/gui/assets'),

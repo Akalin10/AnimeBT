@@ -6,7 +6,7 @@ from time import monotonic
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .resource_seasons import known_seasons, needs_season_help, season_conflict, season_identity, validate_ai_seasons
+from .resource_seasons import cached_seasons, known_seasons, needs_season_help, season_conflict, season_identity, validate_ai_seasons
 from .title_api import endpoint_for
 
 
@@ -40,7 +40,7 @@ class SeasonAssistant(QObject):
 
     def _key(self, row):
         identity = season_identity(row.get("title", ""), row.get("fansub", ""))
-        return self.assistant._id("season:v1:" + identity, []) if len(identity) >= 2 else ""
+        return self.assistant._id("season:v2:" + identity, []) if len(identity) >= 2 else ""
 
     def _db(self):
         db = self.assistant._db()
@@ -62,7 +62,7 @@ class SeasonAssistant(QObject):
         if not key:
             return ()
         if key in self._resolved:
-            return self._resolved[key]
+            return cached_seasons(title, self._resolved[key], row.get("fansub", ""))
         if key in self._pending or key in self._inflight:
             return ()
         try:
@@ -73,9 +73,10 @@ class SeasonAssistant(QObject):
             if cached:
                 data = json.loads(cached[0])
                 # Cache proof, not an unsupported bare model number.
-                value = validate_ai_seasons(data["title"], data["result"]) if isinstance(data, dict) else ()
-                self._resolved[key] = value
-                return value
+                value = cached_seasons(title, data, row.get("fansub", ""))
+                if value or data == []:
+                    self._resolved[key] = data
+                    return value
         except (sqlite3.Error, OSError, ValueError, KeyError, TypeError):
             pass
         if key not in self._pending and key not in self._inflight and monotonic() >= self._retry_after:
@@ -122,8 +123,9 @@ class SeasonAssistant(QObject):
                 for index, (key, title) in enumerate(batch):
                     item = by_id.get(index)
                     value = validate_ai_seasons(title, item)
-                    self._resolved[key] = value
-                    saved.append((key, json.dumps({"title": title, "result": item}, ensure_ascii=False) if value else "[]"))
+                    proof = {"title": title, "result": item} if value else []
+                    self._resolved[key] = proof
+                    saved.append((key, json.dumps(proof, ensure_ascii=False)))
                 try:
                     with self._db() as db:
                         db.executemany("INSERT OR REPLACE INTO resource_seasons (id,data,saved) VALUES (?,?,unixepoch())", saved)

@@ -1,5 +1,0 @@
-*.dll
-*.o
-__pycache__/
-results/
-*.bak

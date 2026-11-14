@@ -1,60 +1,20 @@
 import QtQuick
-import QtQuick.Effects
 
 Text {
     id: label
-
-    required property GlassTheme theme
-
     property int baseStyle: Text.Normal
-    property bool softTextShadow: true
-
-    // 阴影参数：强度 0~1，模糊 0~1，采样数越大越平滑
-    property real shadowStrength: 1.0
-    property real shadowBlur: 1.0
-    property int shadowSamples: 48
-    property real shadowSpread: 1.06
-
-    readonly property bool wallpaperShadowActive:
-        theme.wallpaperTextShadow
-
-    readonly property real textLuminance:
-        color.r * 0.2126 +
-        color.g * 0.7152 +
-        color.b * 0.0722
-
-    // 浅色字配深色影，深色字配浅色影
-    readonly property color contrastShadowColor:
-        textLuminance > 0.5
-        ? "#ff000000"
-        : "#ffffffff"
-
+    property bool softTextShadow: true // Retained for existing resource-title declarations.
+    required property GlassTheme theme
+    readonly property bool wallpaperShadowActive: theme.wallpaperTextShadow
+    readonly property real textLuminance: color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
+    readonly property bool lightTextOnWallpaper: wallpaperShadowActive && textLuminance > 0.5
     font.family: theme.readingFamily
-    font.weight: wallpaperShadowActive
-        ? Font.DemiBold
-        : Font.Normal
-
+    font.weight: Font.Medium
+    renderType: Text.QtRendering
+    renderTypeQuality: 104
+    antialiasing: true
     color: theme.ink
-
-    style: wallpaperShadowActive && !softTextShadow
-        ? Text.Raised
-        : baseStyle
-
-    styleColor: contrastShadowColor
-
-    layer.enabled: wallpaperShadowActive && softTextShadow
-
-    layer.effect: MultiEffect {
-        shadowEnabled: true
-        shadowColor: label.contrastShadowColor
-        shadowOpacity: Math.min(1, label.shadowStrength)
-        shadowBlur: label.shadowBlur
-        shadowScale: label.shadowSpread
-        blurMax: label.shadowSamples
-
-        shadowHorizontalOffset: 0
-        shadowVerticalOffset: 0
-
-        autoPaddingEnabled: true
-    }
+    // Smooth high-quality glyphs with a small native shadow, never a full outline.
+    style: lightTextOnWallpaper ? Text.Raised : Text.Normal
+    styleColor: "#80000000"
 }

@@ -729,7 +729,7 @@ Item {
                         color: colors.ink
                         font: {
                             const titleFont = colors.originalFont(page.assistant.originalTitle(entry.modelData.title), colors.wallpaperTextShadow ? (page.width < 720 ? 18 : 19) : (page.width < 720 ? 16 : 17))
-                            titleFont.weight = colors.wallpaperTextShadow ? Font.Bold : Font.Medium
+                            titleFont.weight = Font.DemiBold
                             return titleFont
                         }
                     }

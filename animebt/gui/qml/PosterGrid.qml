@@ -292,7 +292,7 @@ Item {
                             elide: Text.ElideRight
                             color: colors.accentText
                             font.pixelSize: section.captionSize
-                            font.weight: Font.Medium
+                            font.weight: Font.DemiBold
                         }
                     }
                 }
