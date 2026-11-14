@@ -4,8 +4,6 @@ from pathlib import Path
 from animebt.sources import SOURCE_TYPES
 from animebt.core.runtime import register_secret
 
-THEMES = {"textual-dark": "深色", "textual-light": "浅色", "dracula": "德古拉", "nord": "北欧", "gruvbox": "复古暖色", "ram-limited": "拉姆(限定)"}
-
 
 @dataclass
 class Settings:
@@ -15,7 +13,6 @@ class Settings:
     sources: list[str] = field(default_factory=lambda: [s.name for s in SOURCE_TYPES])
     endpoints: dict[str, str] = field(default_factory=dict)
     torrent_directory: str = field(default_factory=lambda: str(Path.home() / "Downloads"))
-    theme: str = "textual-dark"
 
 
 def save_settings(directory: Path, settings: Settings):
@@ -50,10 +47,9 @@ def load_settings(directory: Path) -> Settings:
     if removed.intersection(data.get("endpoints", {})):
         data["endpoints"] = {name: value for name, value in data["endpoints"].items() if name not in removed}
         migrated = True
-    settings = Settings(**data)
-    if settings.theme not in THEMES:
-        settings.theme = "textual-dark"
+    if data.pop("theme", None) is not None:
         migrated = True
+    settings = Settings(**data)
     if not isinstance(settings.torrent_directory, str):
         raise ValueError("种子保存目录必须为字符串")
     if not 0 < settings.timeout <= 120 or not 1 <= settings.limit <= 100 or settings.cache_ttl < 0:

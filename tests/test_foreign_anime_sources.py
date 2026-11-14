@@ -142,7 +142,7 @@ class ForeignAnimeSourceTest(unittest.IsolatedAsyncioTestCase):
                     await LimitedNyaa(client).search("Anime")
         self.assertEqual(len(calls), 1)
 
-    def test_gui_configuration_is_separate_from_tui_defaults(self):
+    def test_gui_configuration_uses_all_default_sources(self):
         self.assertEqual(Settings().sources, [source.name for source in SOURCE_TYPES])
         self.assertEqual(len(Settings().sources), 8)
         with TemporaryDirectory() as directory:
